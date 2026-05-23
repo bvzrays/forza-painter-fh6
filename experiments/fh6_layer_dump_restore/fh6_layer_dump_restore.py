@@ -142,12 +142,27 @@ def export_dump(args):
     for index, pointer in iter_layer_pointers(pid, table_address, max_layers):
         raw = read_process_memory(pid, pointer, blob_size)
         if len(raw) != blob_size:
-            raise RuntimeError(f"Layer {index} short read: {len(raw)} / {blob_size} bytes.")
+            print(f"Layer {index} short read ({len(raw)} bytes), skipping.", flush=True)
+            layers.append({
+                "index": index,
+                "pointer": pointer,
+                "summary": None,
+                "blob_b64": None,
+                "extra_fragments": {},
+                "skipped": True,
+            })
+            continue
+        extra_frags = {}
+        if len(raw) >= 0x7C:
+            extra_frags["0x38"] = base64.b64encode(raw[0x38:0x40]).decode("ascii")
+            extra_frags["0x48"] = base64.b64encode(raw[0x48:0x60]).decode("ascii")
+            extra_frags["0x68"] = base64.b64encode(raw[0x68:0x7C]).decode("ascii")
         layers.append({
             "index": index,
             "pointer": pointer,
             "summary": summarize_blob(raw, profile),
             "blob_b64": base64.b64encode(raw).decode("ascii"),
+            "extra_fragments": extra_frags,
         })
         if index == 0 or (index + 1) % 100 == 0 or index + 1 == max_layers:
             print(f"Exported layer {index + 1}/{max_layers}", flush=True)
@@ -254,21 +269,65 @@ def restore_known_fields(args):
     if args.max_layers:
         limit = min(limit, int(args.max_layers))
 
-    specs = [
-        (name, getattr(profile, offset_attr), size)
-        for name, offset_attr, size in KNOWN_FIELD_SPECS
-    ]
+    SHAPE_SCALE_DIVISOR = {102: 63}
+
     for item in layers[:limit]:
         index = int(item["index"])
         if index >= layer_count:
             continue
-        raw = base64.b64decode(item["blob_b64"])
+        if item.get("skipped"):
+            if index == 0 or (index + 1) % 100 == 0 or index + 1 == limit:
+                print(f"Skipping layer {index + 1}/{limit} (unreadable in dump)", flush=True)
+            continue
         pointer = dereference_pointer(pid, table_address + index * 8)
-        for _name, offset, size in specs:
-            write_process_memory(pid, pointer + offset, raw[offset:offset + size])
+        if not pointer:
+            print(f"Layer {index + 1}/{limit} pointer is null, skipping", flush=True)
+            continue
+
+        summary = item.get("summary")
+        if not summary:
+            continue
+        pos = summary.get("position", [0.0, 0.0])
+        scale = summary.get("scale", [0.0, 0.0])
+        rot = summary.get("rotation", 0.0)
+        color = summary.get("color", [0, 0, 0, 0])
+        mask = summary.get("mask", 0)
+        shape_id = summary.get("shape_id_byte", 0)
+
+        if not pos or len(pos) < 2:
+            pos = [0.0, 0.0]
+        if not scale or len(scale) < 2:
+            scale = [0.0, 0.0]
+        if not color or len(color) < 4:
+            color = [0, 0, 0, 0]
+
+        # 1. Write extra fragments first (our approach: preserves transform matrix)
+        frags = item.get("extra_fragments", {})
+        for offset_str, blob_b64 in frags.items():
+            frag_data = base64.b64decode(blob_b64)
+            frag_offset = int(offset_str, 16)
+            write_process_memory(pid, pointer + frag_offset, frag_data)
+
+        # 2. Write known fields on top (our draw_memory_shape logic)
+        pos_data = struct.pack('f', pos[0]) + struct.pack('f', pos[1])
+        write_process_memory(pid, pointer + profile.layer_position_offset, pos_data)
+
+        divisor = SHAPE_SCALE_DIVISOR.get(shape_id, 127)
+        scale_data = struct.pack('f', scale[0]) + struct.pack('f', scale[1])
+        write_process_memory(pid, pointer + profile.layer_scale_offset, scale_data)
+
+        rot_data = struct.pack('f', rot)
+        write_process_memory(pid, pointer + profile.layer_rotation_offset, rot_data)
+
+        color_data = struct.pack('BBBB', color[0], color[1], color[2], color[3])
+        write_process_memory(pid, pointer + profile.layer_color_offset, color_data)
+
+        write_process_memory(pid, pointer + profile.layer_mask_offset, struct.pack('B', 1 if mask else 0))
+        write_process_memory(pid, pointer + profile.layer_shape_id_offset, struct.pack('B', shape_id))
+
         if index == 0 or (index + 1) % 100 == 0 or index + 1 == limit:
-            print(f"Restored known fields for layer {index + 1}/{limit}", flush=True)
-    print(f"Restored known fields for {limit} layers.")
+            print(f"Restored layer {index + 1}/{limit} via structured write", flush=True)
+    print(f"Restored {limit} layers using draw_memory_shape logic + extra_fragments.")
 
 
 def restore_fields(args):
