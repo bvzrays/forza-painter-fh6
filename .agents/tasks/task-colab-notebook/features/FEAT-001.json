@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "feat",
   "description": "Create a complete Google Colab notebook (forza_painter_colab.ipynb) that implements the full forza-painter workflow for Colab: language selection (English/Russian), image input (upload or Google Drive), a pure-Python geometrize algorithm with GPU/multiprocessing acceleration, preset selection matching the original config files, and JSON output saved to Google Drive.",
-  "status": "completed",
+  "status": "in_progress",
   "steps": [
     "Create the file forza_painter_colab.ipynb at the repository root as a valid Jupyter notebook JSON structure.",
     "Cell 1 - Language Selection: Create an interactive cell that lets the user choose between English and Russian. Store the choice in a variable. All subsequent user-facing text (print statements, prompts, markdown) must use the selected language. Define a TEXTS dictionary with all UI strings in both languages.",
@@ -34,5 +34,5 @@
     "Run: python3 -c \"import json; nb=json.load(open('forza_painter_colab.ipynb')); src=''.join([''.join(c['source']) for c in nb['cells'] if c['cell_type']=='code']); assert 'numba' in src; assert 'multiprocessing' in src or 'concurrent' in src; assert 'google.colab' in src; assert 'MyDrive/output' in src; print('Key features present')\""
   ],
   "blocked_reason": null,
-  "findings": "Notebook generated successfully. All 3 verification commands pass. Review fixes applied: (1) saveAt values aligned with original INI files for presets 1-3. (2) GPU path restructured to remove CPU-side compute_error_reduction bottleneck; colors are still averaged on CPU (lightweight) but error computation only runs on GPU. (3) multiprocessing.Pool with _init_worker/_eval_worker is wired into the generation loop with periodic pool refresh for canvas state updates. (4) Issue #1 (rectangle coordinates) confirmed to be a non-issue: main.py treats data[0],data[1] as center coords in draw_memory_shape and in the preview rendering (shape.x - shape.w/2), so [cx, cy, w, h] is correct."
+  "findings": "Notebook generated successfully. All 3 verification commands pass. Review fixes applied: (1) saveAt values aligned with original INI files for presets 1-3. (2) GPU path restructured to remove CPU-side compute_error_reduction bottleneck; colors are still averaged on CPU (lightweight) but error computation only runs on GPU. (3) multiprocessing.Pool with _init_worker/_eval_worker is wired into the generation loop with periodic pool refresh for canvas state updates. (4) Issue #1 (rectangle coordinates) confirmed to be a non-issue: main.py treats data[0],data[1] as center coords in draw_memory_shape and in the preview rendering (shape.x - shape.w/2), so [cx, cy, w, h] is correct. (5) Performance fix: replaced the slow Python for-loop in evaluate_candidates_gpu with a single combined CUDA kernel (_gpu_compute_color_and_error_kernel) that computes both average color (with posterization) and error reduction per candidate thread, eliminating the CPU bottleneck entirely. Also fixed progress bar visibility with mininterval=0.5, dynamic_ncols=True, and sys.stdout.flush()."
 }
