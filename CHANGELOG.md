@@ -5,6 +5,7 @@
 - Updated the app version to `v1.6.6`; release packages now use `forza-painter-fh6-v1.6.6.exe`.
 - Added Traditional Chinese UI translations and a wider top-right language selector.
 - Fixed `luma_band` preprocessing for RGB images and made preprocessed-image writes atomic.
+- Packaged OpenCV and NumPy into the one-file EXE so `luma_band` preprocessing works in release builds.
 - Import now requires the FH6 template layer count before starting, preventing confusing auto-locate/import failures caused by an empty layer-count field.
 - Refactored core modules with typed exceptions, frozen dataclasses, and shared utility helpers.
 - Added pytest coverage for geometry JSON normalization and internal color/shape data classes.

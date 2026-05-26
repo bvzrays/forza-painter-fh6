@@ -26,6 +26,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 & $Python -m pip install -r (Join-Path $Root "requirements.txt")
+& $Python -m pip install -r (Join-Path $Root "requirements-preview.txt")
 
 if (Test-Path $BuildRoot) {
     Remove-Item -LiteralPath $BuildRoot -Recurse -Force
@@ -45,7 +46,8 @@ $common = @(
     "--hidden-import", "numpy",
     "--hidden-import", "PIL",
     "--hidden-import", "PIL.Image",
-    "--hidden-import", "PIL.ImageDraw"
+    "--hidden-import", "PIL.ImageDraw",
+    "--hidden-import", "preprocess.luma"
 )
 
 $appArgs = $common + @(
