@@ -1849,13 +1849,6 @@ class App:
         except Exception:
             self.log_line(message)
 
-    def show_full_shape_import_success_prompt(self, count):
-        message = tr(self.lang, "full_shape_import_success_prompt").format(count=count)
-        try:
-            messagebox.showinfo(tr(self.lang, "full_shape_import_done_title"), message)
-        except Exception:
-            self.log_line(message)
-
     def start_update_check(self):
         if self.closed or self.update_check_started:
             return
@@ -3200,30 +3193,30 @@ class App:
                 self.queue.put(("full_shape_failed_prompt", failure))
                 self.queue.put(("status", tr(self.lang, "failed")))
                 return
-            trim_cmd = [
-                *helper_command("fh6_typecode_trim"),
-                "--pid",
-                str(pid),
-                "--group",
-                str(group),
-                "--table",
-                str(table),
-                "--new-count",
-                str(imported),
-                "--trim-vector-end",
-                "--backup",
-                trim_backup,
-                "--write",
-            ]
-            code = self.run_subprocess(trim_cmd, timeout=90)
-            if code != 0:
-                failure = "Full-shape import wrote layers but failed while trimming layer count."
-                self.queue.put(("log", failure))
-                self.queue.put(("full_shape_failed_prompt", failure))
-                self.queue.put(("status", tr(self.lang, "failed")))
-                return
+            # === TRIM DISABLED: importing now shows results immediately without save/reload ===
+            # trim_cmd = [
+            #     *helper_command("fh6_typecode_trim"),
+            #     "--pid",
+            #     str(pid),
+            #     "--group",
+            #     str(group),
+            #     "--table",
+            #     str(table),
+            #     "--new-count",
+            #     str(imported),
+            #     "--trim-vector-end",
+            #     "--backup",
+            #     trim_backup,
+            #     "--write",
+            # ]
+            # code = self.run_subprocess(trim_cmd, timeout=90)
+            # if code != 0:
+            #     failure = "Full-shape import wrote layers but failed while trimming layer count."
+            #     self.queue.put(("log", failure))
+            #     self.queue.put(("full_shape_failed_prompt", failure))
+            #     self.queue.put(("status", tr(self.lang, "failed")))
+            #     return
             self.queue.put(("log", tr(self.lang, "full_shape_import_done").format(count=imported)))
-            self.queue.put(("full_shape_import_success_prompt", imported))
             self.queue.put(("status", tr(self.lang, "done")))
         except Exception as exc:
             self.queue.put(("log", f"{tr(self.lang, 'full_shape_failed')}: {exc}"))
@@ -3430,8 +3423,6 @@ class App:
                     self.full_shape_report_button.config(state="normal")
             elif kind == "full_shape_failed_prompt":
                 self.show_full_shape_failure_prompt(payload)
-            elif kind == "full_shape_import_success_prompt":
-                self.show_full_shape_import_success_prompt(payload)
         if not self.closed:
             self.root.after(100, self._poll_queue)
 
