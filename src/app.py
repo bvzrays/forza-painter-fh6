@@ -898,6 +898,9 @@ class App:
         self.region_drag_start = None
         self.region_drag_mode: str | None = None  # "draw", "move", "rotate"
         self._region_move_snapshot: list[float] | None = None  # original coords when moving
+        self._region_resize_corner: int | None = None  # 0=tl, 1=tr, 2=bl, 3=br
+        self._region_resize_anchor_x: float = 0
+        self._region_resize_anchor_y: float = 0
         self._region_handle_ids: list[int] = []  # tkinter canvas item IDs for rotation handle
         self.region_rubber_id = None
         self.region_poly_points: list[float] = []
@@ -1805,6 +1808,34 @@ class App:
         hy = cy - math.cos(rad) * (hh + handle_offset)
         return math.hypot(x - hx, y - hy) <= 8
 
+    def _region_hit_test_resize(self, x: float, y: float) -> int | None:
+        """Return corner index (0=tl, 1=tr, 2=bl, 3=br) if (x,y) is on a resize handle."""
+        if self.region_selected_index is None or self.region_selected_index >= len(self.region_shapes):
+            return None
+        shape = self.region_shapes[self.region_selected_index]
+        coords = shape.get("coords", [])
+        if len(coords) < 4:
+            return None
+        import math
+        cx = (coords[0] + coords[2]) / 2.0
+        cy = (coords[1] + coords[3]) / 2.0
+        rotation = shape.get("rotation", 0)
+        rad = math.radians(rotation)
+        corners = [
+            (coords[0], coords[1]),
+            (coords[2], coords[1]),
+            (coords[0], coords[3]),
+            (coords[2], coords[3]),
+        ]
+        for i, (ux, uy) in enumerate(corners):
+            dx = ux - cx
+            dy = uy - cy
+            rx = cx + dx * math.cos(rad) - dy * math.sin(rad)
+            ry = cy + dx * math.sin(rad) + dy * math.cos(rad)
+            if abs(x - rx) <= 5 and abs(y - ry) <= 5:
+                return i
+        return None
+
     def _region_canvas_press(self, event):
         tool = self.region_tool.get()
         if tool not in ("rect", "ellipse"):
@@ -1815,6 +1846,26 @@ class App:
             if self._region_hit_test_handle(event.x, event.y):
                 self.region_drag_mode = "rotate"
                 self.region_drag_start = (event.x, event.y)
+                return
+
+            # 1b. Check for resize-handle click
+            corner = self._region_hit_test_resize(event.x, event.y)
+            if corner is not None:
+                self.region_drag_mode = "resize"
+                self.region_drag_start = (event.x, event.y)
+                self._region_resize_corner = corner
+                # Store opposite corner as anchor
+                shape = self.region_shapes[self.region_selected_index]
+                coords = shape["coords"]
+                opposite = {0: 3, 1: 2, 2: 1, 3: 0}[corner]
+                opp_corners = [
+                    (coords[0], coords[1]),
+                    (coords[2], coords[1]),
+                    (coords[0], coords[3]),
+                    (coords[2], coords[3]),
+                ]
+                self._region_resize_anchor_x = opp_corners[opposite][0]
+                self._region_resize_anchor_y = opp_corners[opposite][1]
                 return
 
         # 2. Check if clicking on any shape body
@@ -1875,6 +1926,46 @@ class App:
                 self._region_redraw_overlay()
             return
 
+        if self.region_drag_mode == "resize":
+            if self.region_selected_index is not None and self._region_resize_corner is not None:
+                shape = self.region_shapes[self.region_selected_index]
+                coords = shape["coords"]
+                cx = (coords[0] + coords[2]) / 2.0
+                cy = (coords[1] + coords[3]) / 2.0
+                rotation = shape.get("rotation", 0)
+                # Unrotate mouse position into shape-local space
+                if rotation != 0:
+                    rad_inv = math.radians(-rotation)
+                    dx = event.x - cx
+                    dy = event.y - cy
+                    lx = cx + dx * math.cos(rad_inv) - dy * math.sin(rad_inv)
+                    ly = cy + dx * math.sin(rad_inv) + dy * math.cos(rad_inv)
+                else:
+                    lx, ly = event.x, event.y
+                anchor_x = self._region_resize_anchor_x
+                anchor_y = self._region_resize_anchor_y
+                corner = self._region_resize_corner
+                if corner == 0:      # tl
+                    x1, y1, x2, y2 = lx, ly, anchor_x, anchor_y
+                elif corner == 1:    # tr
+                    x1, y1, x2, y2 = anchor_x, ly, lx, anchor_y
+                elif corner == 2:    # bl
+                    x1, y1, x2, y2 = lx, anchor_y, anchor_x, ly
+                else:                # br
+                    x1, y1, x2, y2 = anchor_x, anchor_y, lx, ly
+                # Enforce ordering and minimum size
+                x1, x2 = min(x1, x2), max(x1, x2)
+                y1, y2 = min(y1, y2), max(y1, y2)
+                if x2 - x1 < 6:
+                    mid = (x1 + x2) / 2
+                    x1, x2 = mid - 3, mid + 3
+                if y2 - y1 < 6:
+                    mid = (y1 + y2) / 2
+                    y1, y2 = mid - 3, mid + 3
+                shape["coords"] = [x1, y1, x2, y2]
+                self._region_redraw_overlay()
+            return
+
         # Draw mode — existing rubberband logic
         tool = self.region_tool.get()
         if self.region_drag_start:
@@ -1900,6 +1991,14 @@ class App:
         if self.region_drag_mode == "rotate":
             self.region_drag_mode = None
             self.region_drag_start = None
+            self._region_redraw_overlay()
+            self._region_update_button_states()
+            return
+
+        if self.region_drag_mode == "resize":
+            self.region_drag_mode = None
+            self.region_drag_start = None
+            self._region_resize_corner = None
             self._region_redraw_overlay()
             self._region_update_button_states()
             return
@@ -2062,6 +2161,30 @@ class App:
                                                      tags=("rot_handle",))
                 self._region_handle_ids = [lid, cid]
 
+                # Draw corner resize handles
+                hw = abs(coords[2] - coords[0]) / 2.0
+                # 4 unrotated corners: tl, tr, bl, br
+                corners = [
+                    (coords[0], coords[1]),
+                    (coords[2], coords[1]),
+                    (coords[0], coords[3]),
+                    (coords[2], coords[3]),
+                ]
+                corner_tags = ("rsz_tl", "rsz_tr", "rsz_bl", "rsz_br")
+                rs = 3  # half-size of resize handle square
+                for i, (ux, uy) in enumerate(corners):
+                    # Rotate around center
+                    dx = ux - cx
+                    dy = uy - cy
+                    rx = cx + dx * math.cos(rad) - dy * math.sin(rad)
+                    ry = cy + dx * math.sin(rad) + dy * math.cos(rad)
+                    rid = self.region_canvas.create_rectangle(
+                        rx - rs, ry - rs, rx + rs, ry + rs,
+                        fill="#ffffff", outline="#000000", width=1,
+                        tags=("resize_handle", corner_tags[i]),
+                    )
+                    self._region_handle_ids.append(rid)
+
     def _region_on_rotation_changed(self, _value=None):
         """Callback when the rotation slider is moved."""
         if self.region_drag_mode == "rotate":
@@ -2116,6 +2239,7 @@ class App:
         self.region_drag_start = None
         self.region_drag_mode = None
         self._region_move_snapshot = None
+        self._region_resize_corner = None
         self.region_selected_index = None
         self.region_rotation_var.set(0)
         self.region_rotation_display.set("0°")
