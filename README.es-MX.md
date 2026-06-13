@@ -157,6 +157,13 @@ Estas carpetas pueden eliminarse cuando la app esté cerrada si quieres restable
 ## Changelog
 
 Aquí solo se conservan las entradas de versiones publicadas. Consulta [CHANGELOG.md](CHANGELOG.md) para ver el changelog que muestra el aviso de actualización de la app.
+### v1.8.5 / 2026-06-13
+
+- **Control de presupuesto en Region Paint**: Al hacer clic en `Start First Pass` cuando las capas del primer pase exceden el Presupuesto Total, o al hacer clic en `Paint Selected Region` cuando las capas usadas + capas de región exceden el Presupuesto Total, ahora se muestra una advertencia clara en el registro y se detiene en lugar de exceder el presupuesto silenciosamente.
+- **Soporte de arrastre multidireccional**: Las herramientas de selección Rectángulo y Elipse en Region Paint ahora funcionan al arrastrar en cualquier dirección (ej. de abajo-derecha a arriba-izquierda). Anteriormente, los arrastres que no fueran de arriba-izquierda a abajo-derecha fallaban con un error de generación de máscara.
+- **Mejoras en el borrado de máscaras**: El botón `Clear All` (renombrado de "Clear Mask") elimina todas las máscaras de selección. Un nuevo botón `Clear Selected` elimina solo la máscara actualmente seleccionada, registrando una sugerencia si no hay nada seleccionado.
+- **Accesibilidad en pantallas pequeñas**: Se agregaron botones duplicados `Open Result Folder` y `Save Result JSON` dentro del área desplazable del Paso 3 con la indicación "(for small screens)", para que los usuarios de portátiles puedan acceder a las acciones de resultado cuando los botones inferiores están fuera de pantalla.
+
 ### v1.8.4 / 2026-06-07
 
 - Las formas de selección en Pintura Regional ahora permiten **arrastrar para mover**, **redimensionar desde las esquinas** y **rotar** (control deslizante, rueda del ratón, entrada de texto o manija en el lienzo).

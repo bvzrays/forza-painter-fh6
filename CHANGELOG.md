@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.8.5 / 2026-06-13
+
+- **Region Paint budget guard**: Clicking `Start First Pass` when First-pass layers exceed Total Budget, or clicking `Paint Selected Region` when used layers + Region layers exceed Total Budget, now shows a clear log warning and stops instead of silently overrunning the budget.
+- **Multi-direction drag support**: Rectangle and Ellipse selection tools in Region Paint now work when dragging in any direction (e.g. bottom-right to top-left). Previously non-top-left-to-bottom-right drags would fail with a mask generation error.
+- **Clear mask improvements**: The `Clear All` button (renamed from "Clear Mask") removes all selection masks. A new `Clear Selected` button deletes only the currently selected mask, logging a hint if nothing is selected.
+- **Small-screen accessibility**: Duplicate `Open Result Folder` and `Save Result JSON` buttons added inside the scrollable Step 3 area with a "(for small screens)" hint, so laptop users can still access result actions when the bottom buttons are off-screen.
+
 ## v1.8.4 / 2026-06-07
 
 - Region Paint selection shapes (rectangle and ellipse) now support **drag to move**, **corner-handle resize**, and **rotation** via slider, scroll wheel, entry box, or on-canvas rotation handle for precise region refinement.

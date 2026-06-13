@@ -1555,6 +1555,20 @@ class App:
         self.region_rotation_label.bind("<Return>", self._region_rotation_entry_apply)
         self.region_rotation_label.bind("<FocusOut>", self._region_rotation_entry_apply)
 
+        # Duplicate result buttons inside scrollable area for small screens
+        hint_row = Frame(step3)
+        hint_row.pack(fill=X, padx=10, pady=(2, 0))
+        hint_label = Label(hint_row, text=tr(self.lang, "region_small_screen_hint"),
+                           bg=self._parent_bg(hint_row), fg=Theme.MUTED, font=("Segoe UI", 8))
+        hint_label.pack(side=LEFT)
+        self.translated.append((hint_label, "region_small_screen_hint", "text"))
+        dup_row = Frame(step3)
+        dup_row.pack(fill=X, padx=10, pady=(2, 6))
+        self.region_open_folder_btn2 = self._button(dup_row, "region_open_result_folder", self._region_open_result_folder, state="disabled")
+        self.region_open_folder_btn2.pack(side=LEFT, fill=X, expand=True)
+        self.region_save_json_btn2 = self._button(dup_row, "region_save_result_json", self._region_save_result_json, state="disabled")
+        self.region_save_json_btn2.pack(side=LEFT, padx=6, fill=X, expand=True)
+
         # Step 4 — Actions
         step4 = ttk.LabelFrame(left_outer, text=tr(self.lang, "region_step_actions"))
         self.translated.append((step4, "region_step_actions", "text"))
@@ -2304,8 +2318,11 @@ class App:
         self.region_first_pass_btn.config(state="normal" if has_image and not running else "disabled")
         self.region_paint_btn.config(state="normal" if has_image and has_shapes and not running else "disabled")
         self.region_stop_btn.config(state="normal" if running else "disabled")
-        self.region_open_folder_btn.config(state="normal" if has_output and not running else "disabled")
-        self.region_save_json_btn.config(state="normal" if has_output and not running else "disabled")
+        enabled = "normal" if has_output and not running else "disabled"
+        self.region_open_folder_btn.config(state=enabled)
+        self.region_save_json_btn.config(state=enabled)
+        self.region_open_folder_btn2.config(state=enabled)
+        self.region_save_json_btn2.config(state=enabled)
         # Heatmap tab: only clickable when a heatmap exists
         has_heatmap = bool(self._region_heatmap_showing)
         if self.region_tab_heatmap_btn:
