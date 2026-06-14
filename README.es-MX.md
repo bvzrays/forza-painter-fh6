@@ -163,6 +163,15 @@ Estas carpetas pueden eliminarse cuando la app esté cerrada si quieres restable
 ## Changelog
 
 Aquí solo se conservan las entradas de versiones publicadas. Consulta [CHANGELOG.md](CHANGELOG.md) para ver el changelog que muestra el aviso de actualización de la app.
+### v1.9.0 / 2026-06-14
+
+- **Text Vinyl** — Nueva pestaña Text para generar JSON de código de tipo FH6 a partir de texto Unicode. Soporta latín, japonés, coreano y chino (simplificado/tradicional) con interfaz localizada.
+  - Escriba o pegue texto y genere capas de vinilo; explore y cargue archivos de fuentes o descubra fuentes CJK instaladas (ordenadas alfabéticamente).
+  - Conversor de color DxBang integrado para selección precisa de color con valores hexadecimales.
+  - Conectado al flujo de importación existente con guía descartable sobre plantillas circulares.
+  - Trazador de pixel art para convertir imágenes en geometría de código de tipo escalada.
+  - Sistema de muestras de color compartido entre pestañas para reutilizar colores.
+
 ### v1.8.5 / 2026-06-13
 
 - **Control de presupuesto en Region Paint**: Al hacer clic en `Start First Pass` cuando las capas del primer pase exceden el Presupuesto Total, o al hacer clic en `Paint Selected Region` cuando las capas usadas + capas de región exceden el Presupuesto Total, ahora se muestra una advertencia clara en el registro y se detiene en lugar de exceder el presupuesto silenciosamente.

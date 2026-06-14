@@ -182,6 +182,15 @@ These folders can be deleted when the app is closed if you want to reset local r
 
 Only versioned release entries are kept here. See [CHANGELOG.md](CHANGELOG.md) for the app update prompt changelog.
 
+### v1.9.0 / 2026-06-14
+
+- **Text Vinyl** — New Text tab for generating FH6 typecode JSON from typed Unicode text. Supports Latin, Japanese, Korean, and Chinese (Simplified/Traditional) with localized UI.
+  - Type or paste text and generate vinyl layers directly; browse and upload font files or discover installed CJK fonts (sorted alphabetically).
+  - Integrated DxBang color converter for precise hex-value color selection.
+  - Wired into the existing Import flow with dismissible circle-template guidance.
+  - Pixel art image tracer for converting images to scaled typecode geometry.
+  - Cross-tab shared color swatch system for reusing colors across workflows.
+
 ### v1.8.5 / 2026-06-13
 
 - **Region Paint budget guard**: Clicking `Start First Pass` when First-pass layers exceed Total Budget, or clicking `Paint Selected Region` when used layers + Region layers exceed Total Budget, now shows a clear log warning and stops instead of silently overrunning the budget.

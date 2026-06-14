@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.9.0 / 2026-06-14
+
+- **Text Vinyl** — New Text tab for generating FH6 typecode JSON from typed Unicode text. Supports Latin, Japanese, Korean, and Chinese (Simplified/Traditional) script panels with localized UI (English, Spanish, Portuguese, Simplified/Traditional Chinese, Korean).
+  - **Text input**: Type or paste text in any supported script; CJK text is auto-detected for optimal shape-mode selection.
+  - **Font browser**: Upload `.ttf`/`.otf`/`.ttc` files directly, or browse installed CJK fonts discovered on the system. Fonts are sorted alphabetically.
+  - **Exact color picker**: Integrated DxBang's color converter with hex-value (`#RRGGBB`) entry for precise text color selection.
+  - **Import flow**: Text-generated JSON is wired into the existing Import page flow with dismissible guidance about circle-template compatibility and save/reload behavior.
+  - **Pixel art geometry** (`pixel_art_geometry`): Image tracer that converts pixel art into scaled typecode geometry for import.
+  - **Shared color palette** (`saved_color_swatches`): Cross-tab color swatch system for reusing favorite colors across Image, Text, and Region Paint workflows.
+  - **Workspace management** (`asset_workspace`): Structured runtime directories with safe cache cleanup, manifest tracking, and copy-on-write file staging.
+  - **Security policy** (`security_policy`): Shared numeric limits for geometry operations and template layer budgets.
+  - **CLI** (`text/cli.py`): Command-line interface for generating text geometry JSON from typed CJK text or text images.
+  - **Tests**: 13 new test files covering text geometry, fonts, stroke tracing, character libraries, layer masks, layout, and import templates.
+
 ## v1.8.5 / 2026-06-13
 
 - **Region Paint budget guard**: Clicking `Start First Pass` when First-pass layers exceed Total Budget, or clicking `Paint Selected Region` when used layers + Region layers exceed Total Budget, now shows a clear log warning and stops instead of silently overrunning the budget.
