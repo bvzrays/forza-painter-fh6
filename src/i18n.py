@@ -199,6 +199,10 @@ Tips
         "region_open_result_folder": "Open Result Folder",
         "region_save_result_json": "Save Result JSON",
         "region_small_screen_hint": "(for small screens)",
+        "region_restore_checkpoint": "Restore Checkpoint",
+        "region_restore_confirm_title": "Restore Checkpoint",
+        "region_restore_confirm": "This will discard progress after the selected checkpoint. Continue?",
+        "region_checkpoint_active": "active",
     },
     "pt-br": {
         "title": app_title(),
@@ -395,6 +399,10 @@ Dicas
         "region_open_result_folder": "Abrir Pasta de Resultados",
         "region_save_result_json": "Salvar JSON do Resultado",
         "region_small_screen_hint": "(para telas pequenas)",
+        "region_restore_checkpoint": "Restaurar Ponto de Verificação",
+        "region_restore_confirm_title": "Restaurar Ponto de Verificação",
+        "region_restore_confirm": "Isso descartará o progresso após o ponto selecionado. Continuar?",
+        "region_checkpoint_active": "ativo",
     },
     "zh": {
         "title": app_title(),
@@ -591,6 +599,10 @@ Dicas
         "region_open_result_folder": "打开结果文件夹",
         "region_save_result_json": "保存结果 JSON",
         "region_small_screen_hint": "（小屏幕备用）",
+        "region_restore_checkpoint": "恢复检查点",
+        "region_restore_confirm_title": "恢复检查点",
+        "region_restore_confirm": "这将丢弃所选检查点之后的所有进度。确定继续吗？",
+        "region_checkpoint_active": "当前",
     },
     "zh-tw": {
         "title": app_title(),
@@ -787,6 +799,10 @@ Dicas
         "region_open_result_folder": "開啟結果資料夾",
         "region_save_result_json": "儲存結果 JSON",
         "region_small_screen_hint": "（小螢幕備用）",
+        "region_restore_checkpoint": "復原檢查點",
+        "region_restore_confirm_title": "復原檢查點",
+        "region_restore_confirm": "這將捨棄所選檢查點之後的所有進度。確定繼續嗎？",
+        "region_checkpoint_active": "當前",
     },
     "ko": {
         "title": app_title(),
@@ -983,6 +999,10 @@ Dicas
         "region_open_result_folder": "결과 폴더 열기",
         "region_save_result_json": "결과 JSON 저장",
         "region_small_screen_hint": "(작은 화면용)",
+        "region_restore_checkpoint": "체크포인트 복원",
+        "region_restore_confirm_title": "체크포인트 복원",
+        "region_restore_confirm": "선택한 체크포인트 이후의 진행 상황이 삭제됩니다. 계속하시겠습니까?",
+        "region_checkpoint_active": "현재",
     },
     "es": {
         "title": app_title(),
@@ -1178,6 +1198,10 @@ Consejos
         "region_open_result_folder": "Abrir carpeta de resultados",
         "region_save_result_json": "Guardar JSON del resultado",
         "region_small_screen_hint": "(para pantallas pequeñas)",
+        "region_restore_checkpoint": "Restaurar Punto de Control",
+        "region_restore_confirm_title": "Restaurar Punto de Control",
+        "region_restore_confirm": "Esto descartará el progreso después del punto seleccionado. ¿Continuar?",
+        "region_checkpoint_active": "activo",
     },
 }
 

@@ -79,7 +79,13 @@ def prepare_first_pass(
 
 
 def finalize_first_pass(prep):
-    """Post-process after first-pass exe finishes."""
+    """Post-process after first-pass exe finishes.
+
+    Saves the result as base.json AND as an independent checkpoint so
+    the user can later roll back to this exact state.
+    """
+    import shutil
+
     output_dir = Path(prep["output_dir"])
     base_json = Path(prep["base_json"])
     target_png = Path(prep["target_png"])
@@ -91,7 +97,6 @@ def finalize_first_pass(prep):
         return {"ok": False, "error": "No JSON output found after generation."}
     actual_json = json_files[0]
     if actual_json != base_json:
-        import shutil
         shutil.copy2(actual_json, base_json)
     shapes = load_shapes_from_json(base_json)
     layers = max(0, len(shapes) - 1)
@@ -100,8 +105,36 @@ def finalize_first_pass(prep):
     except Exception:
         pass
     state.base_json = str(base_json)
-    state.add_pass(mask_path=None, layers=layers, json_path=str(base_json))
-    return {"ok": True, "layers": layers, "preview_png": str(preview_png)}
+
+    # --- Save independent checkpoint ---
+    checkpoints_dir = output_dir / "checkpoints"
+    checkpoints_dir.mkdir(parents=True, exist_ok=True)
+    pass_num = 1
+    attempt = state.next_attempt(pass_num)
+    ckpt_json = checkpoints_dir / f"pass{pass_num}_attempt{attempt}.json"
+    ckpt_preview = checkpoints_dir / f"pass{pass_num}_attempt{attempt}_preview.png"
+    ckpt_heatmap = checkpoints_dir / f"pass{pass_num}_attempt{attempt}_heatmap.png"
+    shutil.copy2(base_json, ckpt_json)
+    if preview_png.exists():
+        shutil.copy2(preview_png, ckpt_preview)
+    # Generate heatmap for checkpoint
+    try:
+        from scripts.heatmap import generate_standalone_heatmap
+        generate_standalone_heatmap(base_json, ckpt_heatmap)
+    except Exception:
+        pass
+
+    state.add_pass(
+        mask_path=None, layers=layers,
+        json_path=str(ckpt_json),
+        pass_num=pass_num, attempt=attempt,
+        preview_path=str(ckpt_preview),
+        heatmap_path=str(ckpt_heatmap),
+    )
+    return {"ok": True, "layers": layers, "preview_png": str(preview_png),
+            "checkpoint_json": str(ckpt_json),
+            "checkpoint_preview": str(ckpt_preview),
+            "checkpoint_heatmap": str(ckpt_heatmap)}
 
 
 def prepare_region_pass(
@@ -206,8 +239,12 @@ def finalize_region_pass(prep):
     The exe ran with: pruned shapes → generated *region_layers* new shapes.
     We extract the new shapes (last region_layers type-16 from the exe
     output), merge them with the original full backup, and save.
+
+    Saves the merged result as base.json AND as an independent checkpoint
+    so the user can later roll back to this exact state.
     """
     import json
+    import shutil
     import time
 
     _t0 = time.time()
@@ -269,7 +306,7 @@ def finalize_region_pass(prep):
     if new_layers == 0:
         new_layers = region_layers
 
-    # Save merged result.
+    # Save merged result to base.json (active state).
     _t = time.time()
     base_json.write_text(
         json.dumps({"shapes": merged}, indent=2, ensure_ascii=False),
@@ -277,7 +314,7 @@ def finalize_region_pass(prep):
     )
     print(f"[finalize_region_pass] save merged json: {time.time() - _t:.3f}s")
 
-    # Render preview.
+    # Render preview for active state.
     _t = time.time()
     try:
         render_preview_high_quality(target_png, merged, preview_png, max_preview_size)
@@ -285,21 +322,49 @@ def finalize_region_pass(prep):
         pass
     print(f"[finalize_region_pass] render preview: {time.time() - _t:.3f}s")
 
-    _t = time.time()
-    state.add_pass(mask_path=str(mask_png), layers=new_layers, json_path=str(base_json))
+    # --- Save independent checkpoint ---
+    checkpoints_dir = output_dir / "checkpoints"
+    checkpoints_dir.mkdir(parents=True, exist_ok=True)
+    # pass_n = number of completed passes + 1 (the one we just finished)
+    pass_num = len(state.passes) + 1
+    attempt = state.next_attempt(pass_num)
+    ckpt_json = checkpoints_dir / f"pass{pass_num}_attempt{attempt}.json"
+    ckpt_preview = checkpoints_dir / f"pass{pass_num}_attempt{attempt}_preview.png"
+    ckpt_heatmap = checkpoints_dir / f"pass{pass_num}_attempt{attempt}_heatmap.png"
+    shutil.copy2(base_json, ckpt_json)
+    if preview_png.exists():
+        shutil.copy2(preview_png, ckpt_preview)
+    # Generate heatmap for checkpoint
+    try:
+        from scripts.heatmap import generate_standalone_heatmap
+        generate_standalone_heatmap(base_json, ckpt_heatmap)
+    except Exception:
+        pass
+    print(f"[finalize_region_pass] checkpoint saved: {ckpt_json}")
+
+    state.add_pass(
+        mask_path=str(mask_png), layers=new_layers,
+        json_path=str(ckpt_json),
+        pass_num=pass_num, attempt=attempt,
+        preview_path=str(ckpt_preview),
+        heatmap_path=str(ckpt_heatmap),
+    )
     print(f"[finalize_region_pass] state.add_pass: {time.time() - _t:.3f}s")
 
-    # Clean up backup and pruned JSON.
-    _t = time.time()
-    for p in (backup_json, Path(prep.get("pruned_json", ""))):
-        try:
-            p.unlink()
-        except (OSError, TypeError):
-            pass
+    # Keep _base_backup.json for potential future rollbacks.
+    # Only clean up the pruned JSON (temporary file).
+    pruned_json = Path(prep.get("pruned_json", ""))
+    try:
+        pruned_json.unlink()
+    except (OSError, TypeError):
+        pass
     print(f"[finalize_region_pass] cleanup: {time.time() - _t:.3f}s")
 
     print(f"[finalize_region_pass] TOTAL: {time.time() - _t0:.3f}s")
-    return {"ok": True, "new_total": len(merged_type16), "preview_png": str(preview_png)}
+    return {"ok": True, "new_total": len(merged_type16), "preview_png": str(preview_png),
+            "checkpoint_json": str(ckpt_json),
+            "checkpoint_preview": str(ckpt_preview),
+            "checkpoint_heatmap": str(ckpt_heatmap)}
 
 
 def get_status(output_dir):
@@ -311,6 +376,50 @@ def get_status(output_dir):
         "remaining": state.remaining_budget,
         "passes": state.passes,
         "is_first_pass_done": state.is_first_pass_done,
+        "active_checkpoint_index": state.active_checkpoint_index,
+    }
+
+
+def restore_checkpoint(output_dir, checkpoint_index: int):
+    """Roll back to a specific checkpoint.
+
+    Copies the checkpoint JSON to base.json, re-renders preview and
+    heatmap for the active state. Returns dict with paths for UI refresh.
+    """
+    import shutil
+    output_dir = Path(output_dir)
+    state = StateManager(output_dir)
+    entry = state.restore_to_checkpoint(checkpoint_index)
+
+    ckpt_json = Path(entry["json"])
+    base_json = output_dir / "base.json"
+    if ckpt_json.exists() and ckpt_json != base_json:
+        shutil.copy2(ckpt_json, base_json)
+
+    # Re-render preview
+    target_png = Path(state.target_path)
+    preview_png = output_dir / "preview.png"
+    if target_png.exists() and base_json.exists():
+        shapes = load_shapes_from_json(base_json)
+        try:
+            render_preview_high_quality(target_png, shapes, preview_png, state.max_preview_size)
+        except Exception:
+            pass
+
+    # Re-render heatmap
+    heatmap_png = output_dir / "heatmap.png"
+    if base_json.exists():
+        try:
+            from scripts.heatmap import generate_standalone_heatmap
+            generate_standalone_heatmap(base_json, heatmap_png)
+        except Exception:
+            pass
+
+    return {
+        "ok": True,
+        "preview_png": str(preview_png) if preview_png.exists() else "",
+        "heatmap_png": str(heatmap_png) if heatmap_png.exists() else "",
+        "checkpoint": entry,
     }
 
 

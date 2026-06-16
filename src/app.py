@@ -41,6 +41,7 @@ from region_painter.workflow import (
     get_status as region_get_status,
     prepare_first_pass,
     prepare_region_pass,
+    restore_checkpoint as region_restore_checkpoint,
 )
 from version import APP_DISPLAY_NAME, __version__, app_title
 
@@ -944,6 +945,9 @@ class App:
         self._region_right_tab: str = "preview"
         self.region_heatmap_ref = None
         self._region_heatmap_showing: str = ""
+        # Checkpoint state
+        self._region_checkpoint_data: list[dict] = []  # parallel to Listbox entries
+        self._region_active_checkpoint_index: int = -1
         self._build()
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         self.refresh_processes()
@@ -1801,8 +1805,14 @@ class App:
         hist = ttk.LabelFrame(left_outer, text=tr(self.lang, "region_pass_history"))
         self.translated.append((hist, "region_pass_history", "text"))
         hist.pack(fill=X, pady=(6, 0))
-        self.region_pass_list = Listbox(hist, height=4)
-        self.region_pass_list.pack(fill=X, padx=10, pady=(4, 8))
+        self.region_pass_list = Listbox(hist, height=4, exportselection=False)
+        self.region_pass_list.pack(fill=X, padx=10, pady=(4, 4))
+        self.region_pass_list.bind("<<ListboxSelect>>", self._region_on_checkpoint_select)
+        # Restore button
+        ckpt_row = Frame(hist)
+        ckpt_row.pack(fill=X, padx=10, pady=(0, 8))
+        self.region_restore_btn = self._button(ckpt_row, "region_restore_checkpoint", self._region_restore_checkpoint, state="disabled")
+        self.region_restore_btn.pack(side=LEFT)
 
         # Result actions
         result_row = Frame(left_outer)
@@ -2534,6 +2544,15 @@ class App:
         self.region_save_json_btn.config(state=enabled)
         self.region_open_folder_btn2.config(state=enabled)
         self.region_save_json_btn2.config(state=enabled)
+        # Restore button: enabled when a non-active checkpoint is selected
+        restore_ok = False
+        if has_output and not running:
+            sel = self.region_pass_list.curselection()
+            if sel:
+                sel_idx = sel[0]
+                if sel_idx != self._region_active_checkpoint_index:
+                    restore_ok = True
+        self.region_restore_btn.config(state="normal" if restore_ok else "disabled")
         # Heatmap tab: only clickable when a heatmap exists
         has_heatmap = bool(self._region_heatmap_showing)
         if self.region_tab_heatmap_btn:
@@ -2747,6 +2766,10 @@ class App:
 
             result = finalize_first_pass(prep)
             result["preview_path"] = prep.get("preview_png", "")
+            # Propagate checkpoint paths for UI
+            result["checkpoint_json"] = result.get("checkpoint_json", "")
+            result["checkpoint_preview"] = result.get("checkpoint_preview", "")
+            result["checkpoint_heatmap"] = result.get("checkpoint_heatmap", "")
             # Generate heatmap from the resulting geometry JSON
             try:
                 base_json = Path(prep["base_json"])
@@ -2896,6 +2919,10 @@ class App:
 
             result = finalize_region_pass(prep)
             result["preview_path"] = prep.get("preview_png", "")
+            # Propagate checkpoint paths for UI
+            result["checkpoint_json"] = result.get("checkpoint_json", "")
+            result["checkpoint_preview"] = result.get("checkpoint_preview", "")
+            result["checkpoint_heatmap"] = result.get("checkpoint_heatmap", "")
             # Generate heatmap from the resulting geometry JSON
             try:
                 base_json = Path(prep["base_json"])
@@ -2916,6 +2943,103 @@ class App:
         self.shutdown_event.set()
         self.region_status.set(tr(self.lang, "stopped"))
         self.region_workflow_running = False
+        self._region_update_button_states()
+
+    # ==================================================================
+    # Region Paint — Checkpoint selection & rollback
+    # ==================================================================
+
+    def _region_on_checkpoint_select(self, _event=None):
+        """Handle Listbox selection: enable/disable restore button."""
+        self._region_update_button_states()
+
+    def _region_restore_checkpoint(self):
+        """Roll back to the selected checkpoint."""
+        sel = self.region_pass_list.curselection()
+        if not sel:
+            return
+        sel_idx = sel[0]
+        if sel_idx < 0 or sel_idx >= len(self._region_checkpoint_data):
+            return
+        entry = self._region_checkpoint_data[sel_idx]
+        if entry.get("is_active"):
+            self.log_line("Region Paint: already at this checkpoint.")
+            return
+        # Confirm with user
+        from tkinter import messagebox
+        ok = messagebox.askyesno(
+            tr(self.lang, "region_restore_confirm_title"),
+            tr(self.lang, "region_restore_confirm"),
+        )
+        if not ok:
+            return
+
+        try:
+            result = region_restore_checkpoint(self.region_current_output_dir, sel_idx)
+        except Exception as exc:
+            self.log_line(f"Region Paint: restore failed — {exc}")
+            return
+
+        if not result.get("ok"):
+            self.log_line(f"Region Paint: restore failed — {result.get('error', 'unknown')}")
+            return
+
+        # Update preview
+        preview_path = result.get("preview_png")
+        if preview_path and Path(preview_path).exists():
+            self._region_preview_showing = str(preview_path)
+            if self._region_right_tab == "preview":
+                self._region_display_preview(Path(preview_path))
+
+        # Update heatmap
+        heatmap_path = result.get("heatmap_png")
+        if heatmap_path and Path(heatmap_path).exists():
+            self._region_heatmap_showing = str(heatmap_path)
+            if self._region_right_tab == "heatmap":
+                self._region_display_heatmap(Path(heatmap_path))
+            if self.region_tab_heatmap_btn:
+                self.region_tab_heatmap_btn.config(fg=Theme.TEXT, cursor="hand2")
+
+        # Refresh pass list to reflect the new active checkpoint
+        try:
+            status = region_get_status(self.region_current_output_dir)
+            active_idx = status.get("active_checkpoint_index", -1)
+            self._region_active_checkpoint_index = active_idx
+            checkpoints = status.get("passes", [])
+            self._region_checkpoint_data = []
+            self.region_pass_list.delete(0, END)
+            for i, cp in enumerate(checkpoints):
+                pn = cp.get("pass_num", i + 1)
+                att = cp.get("attempt", 1)
+                ly = cp.get("layers", 0)
+                is_first = not cp.get("mask")
+                pass_type = "first pass" if is_first else "region"
+                label = f"Pass {pn} (att {att}): {ly} layers — {pass_type}"
+                if i == active_idx:
+                    label += "  ◀ " + tr(self.lang, "region_checkpoint_active")
+                self.region_pass_list.insert(END, label)
+                self._region_checkpoint_data.append({
+                    "index": i,
+                    "pass_num": pn,
+                    "attempt": att,
+                    "layers": ly,
+                    "json_path": cp.get("json", ""),
+                    "preview_path": cp.get("preview", ""),
+                    "heatmap_path": cp.get("heatmap", ""),
+                    "is_active": i == active_idx,
+                })
+                if i == active_idx:
+                    self.region_pass_list.selection_set(i)
+            self.region_remaining_var.set(str(status.get("remaining", 0)))
+        except Exception:
+            pass
+
+        ckpt = result.get("checkpoint", {})
+        self.log_line(
+            f"Region Paint: restored to Pass {ckpt.get('pass_num', '?')} "
+            f"(attempt {ckpt.get('attempt', '?')}) "
+            f"— {ckpt.get('layers', 0)} layers"
+        )
         self._region_update_button_states()
 
     def _region_display_preview(self, preview_path: Path):
@@ -5083,33 +5207,53 @@ class App:
                     self.region_progress.set("")
                     if result.get("new_total"):
                         self.region_progress.set(f"Total layers: {result['new_total']}")
-                    # Refresh pass history
+                    # Refresh pass history from state manager
                     pass_label = "complete"
                     if self.region_current_output_dir:
                         try:
                             status = region_get_status(self.region_current_output_dir)
+                            checkpoints = status.get("passes", [])
+                            active_idx = status.get("active_checkpoint_index", -1)
+                            self._region_active_checkpoint_index = active_idx
+                            self._region_checkpoint_data = []
                             self.region_pass_list.delete(0, END)
-                            for i, p in enumerate(status.get("passes", []), 1):
-                                label = f"#{i}: {p.get('layers', 0)} layers"
-                                if p.get("mask"):
-                                    label += " (region)"
-                                else:
-                                    label += " (first pass)"
+                            for i, entry in enumerate(checkpoints):
+                                pn = entry.get("pass_num", i + 1)
+                                att = entry.get("attempt", 1)
+                                ly = entry.get("layers", 0)
+                                is_first = not entry.get("mask")
+                                pass_type = "first pass" if is_first else "region"
+                                # Build display label
+                                label = f"Pass {pn} (att {att}): {ly} layers — {pass_type}"
+                                if i == active_idx:
+                                    label += "  ◀ " + tr(self.lang, "region_checkpoint_active")
                                 self.region_pass_list.insert(END, label)
+                                self._region_checkpoint_data.append({
+                                    "index": i,
+                                    "pass_num": pn,
+                                    "attempt": att,
+                                    "layers": ly,
+                                    "json_path": entry.get("json", ""),
+                                    "preview_path": entry.get("preview", ""),
+                                    "heatmap_path": entry.get("heatmap", ""),
+                                    "is_active": i == active_idx,
+                                })
+                                # Highlight active checkpoint
+                                if i == active_idx:
+                                    self.region_pass_list.selection_set(i)
                             # Capture last pass info for logging
-                            passes = status.get("passes", [])
-                            if passes:
-                                last = passes[-1]
+                            if checkpoints:
+                                last = checkpoints[-1]
                                 pass_type = "region pass" if last.get("mask") else "first pass"
-                                pass_label = f"Pass #{len(passes)} {pass_type} complete — {last.get('layers', 0)} layers"
+                                pass_label = f"Pass #{last.get('pass_num', len(checkpoints))} (att {last.get('attempt', 1)}) {pass_type} complete — {last.get('layers', 0)} layers"
                             self.region_remaining_var.set(str(status.get("remaining", 0)))
                         except Exception:
                             pass
                     self.log_line(f"Region Paint: {pass_label}")
-                    # Auto-clear mask first (same as pressing "Clear Mask" button)
+                    # Auto-clear mask
                     self._region_clear_mask()
-                    # Show preview if available
-                    preview_path = result.get("preview_path")
+                    # Show preview if available — prefer checkpoint preview
+                    preview_path = result.get("checkpoint_preview") or result.get("preview_path")
                     if not preview_path:
                         preview_path = Path(self.region_current_output_dir) / "preview.png"
                     else:
@@ -5118,17 +5262,15 @@ class App:
                         if self._region_right_tab == "preview":
                             self._region_display_preview(preview_path)
                         else:
-                            # Cache preview so it's ready when user switches tab
                             self._region_preview_showing = str(preview_path)
-                    # Handle heatmap
-                    heatmap_path = result.get("heatmap_path")
+                    # Handle heatmap — prefer checkpoint heatmap
+                    heatmap_path = result.get("checkpoint_heatmap") or result.get("heatmap_path")
                     if heatmap_path:
                         heatmap_p = Path(heatmap_path)
                         if heatmap_p.exists():
                             if self._region_right_tab == "heatmap":
                                 self._region_display_heatmap(heatmap_p)
                             else:
-                                # Cache the path so it's ready on tab switch
                                 self._region_heatmap_showing = str(heatmap_p)
                             if self.region_tab_heatmap_btn:
                                 self.region_tab_heatmap_btn.config(fg=Theme.TEXT, cursor="hand2")
