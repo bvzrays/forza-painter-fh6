@@ -74,6 +74,8 @@ class StateManager:
             "target_path": "",
             "preview_path": "",
             "passes": [],
+            "active_checkpoint_index": 0,
+            "checkpoint_counter": {},
         }
         self.save()
 
@@ -87,7 +89,18 @@ class StateManager:
 
     @property
     def used_layers(self) -> int:
-        return int(self._data.get("used_layers", 0))
+        """Layers used up to the active checkpoint (inclusive)."""
+        active = self.active_checkpoint_index
+        passes = self._data.get("passes", [])
+        if active < 0 or not passes:
+            return 0
+        # Sum layers from pass 0 up to and including active_checkpoint_index
+        total = 0
+        for i, p in enumerate(passes):
+            if i > active:
+                break
+            total += p.get("layers", 0)
+        return total
 
     @property
     def remaining_budget(self) -> int:
@@ -96,6 +109,18 @@ class StateManager:
     @property
     def is_first_pass_done(self) -> bool:
         return self.used_layers > 0 and len(self._data.get("passes", [])) >= 1
+
+    @property
+    def active_checkpoint_index(self) -> int:
+        return int(self._data.get("active_checkpoint_index", -1))
+
+    @active_checkpoint_index.setter
+    def active_checkpoint_index(self, value: int) -> None:
+        self._data["active_checkpoint_index"] = int(value)
+
+    @property
+    def checkpoint_counter(self) -> dict:
+        return dict(self._data.get("checkpoint_counter", {}))
 
     @property
     def working_width(self) -> int:
@@ -150,18 +175,79 @@ class StateManager:
         mask_path: str | None,
         layers: int,
         json_path: str,
+        pass_num: int | None = None,
+        attempt: int | None = None,
+        preview_path: str = "",
+        heatmap_path: str = "",
     ) -> None:
-        """Record a completed generation pass."""
+        """Record a completed generation pass (checkpoint).
+
+        Args:
+            mask_path: Path to the mask PNG used (None for first pass).
+            layers: Number of layers added in this pass.
+            json_path: Path to the checkpoint JSON file.
+            pass_num: Logical pass number (1 = first pass, 2 = first region, etc.).
+            attempt: Attempt number for this pass_num (1, 2, ... after rollbacks).
+            preview_path: Path to checkpoint-specific preview PNG.
+            heatmap_path: Path to checkpoint-specific heatmap PNG.
+        """
+        import datetime as _dt
+        passes = self._data.setdefault("passes", [])
+        actual_pass_num = pass_num if pass_num is not None else len(passes) + 1
+        actual_attempt = attempt if attempt is not None else 1
         entry: dict = {
+            "pass_num": actual_pass_num,
+            "attempt": actual_attempt,
             "mask": str(mask_path) if mask_path else None,
             "layers": layers,
             "json": str(json_path),
+            "preview": str(preview_path) if preview_path else "",
+            "heatmap": str(heatmap_path) if heatmap_path else "",
+            "timestamp": _dt.datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
         }
-        self._data.setdefault("passes", []).append(entry)
-        self._data["used_layers"] = sum(
-            p.get("layers", 0) for p in self._data["passes"]
-        )
+        passes.append(entry)
+        # Set active checkpoint to the newly added pass
+        self._data["active_checkpoint_index"] = len(passes) - 1
+        # Recompute used_layers up to active checkpoint
+        self._data["used_layers"] = self.used_layers
         self.save()
+
+    def get_checkpoints(self) -> list[dict]:
+        """Return all checkpoint entries with metadata for UI display."""
+        return list(self._data.get("passes", []))
+
+    def restore_to_checkpoint(self, index: int) -> dict:
+        """Roll back to a specific checkpoint by its index in the passes array.
+
+        Sets active_checkpoint_index, updates base_json to point to the
+        checkpoint's JSON file, and recomputes used_layers.
+        Returns the checkpoint entry dict.
+        """
+        passes = self._data.get("passes", [])
+        if index < 0 or index >= len(passes):
+            raise IndexError(f"Checkpoint index {index} out of range (0-{len(passes) - 1})")
+        entry = passes[index]
+        self._data["active_checkpoint_index"] = index
+        self._data["base_json"] = str(entry.get("json", ""))
+        self._data["used_layers"] = self.used_layers
+        self.save()
+        return dict(entry)
+
+    def next_attempt(self, pass_num: int) -> int:
+        """Return the next attempt number for the given pass_num, and increment.
+
+        Called when starting a new pass. If the user has already run pass N
+        once and is re-running it after a rollback, this returns 2 (or higher).
+        """
+        counter = self._data.setdefault("checkpoint_counter", {})
+        key = str(pass_num)
+        current = counter.get(key, 0)
+        next_val = current + 1
+        counter[key] = next_val
+        # Also update _data directly since we modified the nested dict
+        self._data["checkpoint_counter"] = counter
+        # Don't save here — caller will save after add_pass()
+        return next_val
 
     def reset(self) -> None:
         """Clear all state for a fresh workflow."""
@@ -190,3 +276,5 @@ class StateManager:
         self._data.setdefault("target_path", "")
         self._data.setdefault("preview_path", "")
         self._data.setdefault("passes", [])
+        self._data.setdefault("active_checkpoint_index", -1)
+        self._data.setdefault("checkpoint_counter", {})

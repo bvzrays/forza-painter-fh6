@@ -41,6 +41,7 @@ from region_painter.workflow import (
     get_status as region_get_status,
     prepare_first_pass,
     prepare_region_pass,
+    restore_checkpoint as region_restore_checkpoint,
 )
 from version import APP_DISPLAY_NAME, __version__, app_title
 
@@ -944,6 +945,9 @@ class App:
         self._region_right_tab: str = "preview"
         self.region_heatmap_ref = None
         self._region_heatmap_showing: str = ""
+        # Checkpoint state
+        self._region_checkpoint_data: list[dict] = []  # parallel to Listbox entries
+        self._region_active_checkpoint_index: int = -1
         self._build()
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         self.refresh_processes()
@@ -1641,44 +1645,86 @@ class App:
         left_outer = Frame(self.region_paint_tab)
         left_outer.pack(side=LEFT, fill=BOTH, expand=False, padx=(0, 10), pady=10)
 
-        scroll_area = Frame(left_outer)
-        scroll_area.pack(fill=BOTH, expand=True, pady=(0, 8))
-        left_canvas = Canvas(scroll_area, highlightthickness=0, width=380)
-        left_scroll = ttk.Scrollbar(scroll_area, orient="vertical", command=left_canvas.yview)
-        left_canvas.configure(yscrollcommand=left_scroll.set)
-        left_canvas.pack(side=LEFT, fill=BOTH, expand=True)
-        left_scroll.pack(side=RIGHT, fill="y")
-        left = Frame(left_canvas)
-        left_window = left_canvas.create_window((0, 0), window=left, anchor="nw")
+        # --- Scrollable area 1: Steps 1-3 ---
+        scroll_area_1 = Frame(left_outer)
+        scroll_area_1.pack(fill=BOTH, expand=True, pady=(0, 4))
+        left_canvas_1 = Canvas(scroll_area_1, highlightthickness=0, width=380)
+        left_scroll_1 = ttk.Scrollbar(scroll_area_1, orient="vertical", command=left_canvas_1.yview)
+        left_canvas_1.configure(yscrollcommand=left_scroll_1.set)
+        left_canvas_1.pack(side=LEFT, fill=BOTH, expand=True)
+        left_scroll_1.pack(side=RIGHT, fill="y")
+        left_1 = Frame(left_canvas_1)
+        left_window_1 = left_canvas_1.create_window((0, 0), window=left_1, anchor="nw")
 
-        def _apply_region_scroll_region():
-            left_canvas.configure(scrollregion=left_canvas.bbox("all"))
+        # --- Scrollable area 2: Step 4, Pass History, Result buttons ---
+        scroll_area_2 = Frame(left_outer)
+        scroll_area_2.pack(fill=BOTH, expand=True, pady=(4, 0))
+        left_canvas_2 = Canvas(scroll_area_2, highlightthickness=0, width=380)
+        left_scroll_2 = ttk.Scrollbar(scroll_area_2, orient="vertical", command=left_canvas_2.yview)
+        left_canvas_2.configure(yscrollcommand=left_scroll_2.set)
+        left_canvas_2.pack(side=LEFT, fill=BOTH, expand=True)
+        left_scroll_2.pack(side=RIGHT, fill="y")
+        left_2 = Frame(left_canvas_2)
+        left_window_2 = left_canvas_2.create_window((0, 0), window=left_2, anchor="nw")
 
-        def _update_region_scroll_region(_event=None):
-            left_canvas.after(LAYOUT_RESIZE_DEBOUNCE_MS, _apply_region_scroll_region)
+        # --- Scroll helpers for area 1 ---
+        def _apply_region_scroll_region_1():
+            left_canvas_1.configure(scrollregion=left_canvas_1.bbox("all"))
 
-        def _match_region_canvas_width(event):
+        def _update_region_scroll_region_1(_event=None):
+            left_canvas_1.after(LAYOUT_RESIZE_DEBOUNCE_MS, _apply_region_scroll_region_1)
+
+        def _match_region_canvas_width_1(event):
             width = max(1, int(event.width))
             bucket = max(1, LAYOUT_SIZE_BUCKET)
             width = max(1, int(round(width / bucket) * bucket))
-            left_canvas.itemconfigure(left_window, width=width)
+            left_canvas_1.itemconfigure(left_window_1, width=width)
 
-        def _region_mousewheel(event):
-            left_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        def _region_mousewheel_1(event):
+            left_canvas_1.yview_scroll(int(-1 * (event.delta / 120)), "units")
 
-        def _bind_region_mousewheel(_event=None):
-            left_canvas.bind_all("<MouseWheel>", _region_mousewheel)
+        def _bind_region_mousewheel_1(_event=None):
+            left_canvas_1.bind_all("<MouseWheel>", _region_mousewheel_1)
 
-        def _unbind_region_mousewheel(_event=None):
-            left_canvas.unbind_all("<MouseWheel>")
+        def _unbind_region_mousewheel_1(_event=None):
+            left_canvas_1.unbind_all("<MouseWheel>")
 
-        left.bind("<Configure>", _update_region_scroll_region)
-        left_canvas.bind("<Configure>", _match_region_canvas_width)
-        scroll_area.bind("<Enter>", _bind_region_mousewheel)
-        scroll_area.bind("<Leave>", _unbind_region_mousewheel)
+        # --- Scroll helpers for area 2 ---
+        def _apply_region_scroll_region_2():
+            left_canvas_2.configure(scrollregion=left_canvas_2.bbox("all"))
+
+        def _update_region_scroll_region_2(_event=None):
+            left_canvas_2.after(LAYOUT_RESIZE_DEBOUNCE_MS, _apply_region_scroll_region_2)
+
+        def _match_region_canvas_width_2(event):
+            width = max(1, int(event.width))
+            bucket = max(1, LAYOUT_SIZE_BUCKET)
+            width = max(1, int(round(width / bucket) * bucket))
+            left_canvas_2.itemconfigure(left_window_2, width=width)
+
+        def _region_mousewheel_2(event):
+            left_canvas_2.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+        def _bind_region_mousewheel_2(_event=None):
+            left_canvas_2.bind_all("<MouseWheel>", _region_mousewheel_2)
+
+        def _unbind_region_mousewheel_2(_event=None):
+            left_canvas_2.unbind_all("<MouseWheel>")
+
+        # Bind scroll-area 1
+        left_1.bind("<Configure>", _update_region_scroll_region_1)
+        left_canvas_1.bind("<Configure>", _match_region_canvas_width_1)
+        scroll_area_1.bind("<Enter>", _bind_region_mousewheel_1)
+        scroll_area_1.bind("<Leave>", _unbind_region_mousewheel_1)
+
+        # Bind scroll-area 2
+        left_2.bind("<Configure>", _update_region_scroll_region_2)
+        left_canvas_2.bind("<Configure>", _match_region_canvas_width_2)
+        scroll_area_2.bind("<Enter>", _bind_region_mousewheel_2)
+        scroll_area_2.bind("<Leave>", _unbind_region_mousewheel_2)
 
         # Step 1 — Image & Profile
-        step1 = ttk.LabelFrame(left, text=tr(self.lang, "region_step_image"))
+        step1 = ttk.LabelFrame(left_1, text=tr(self.lang, "region_step_image"))
         self.translated.append((step1, "region_step_image", "text"))
         step1.pack(fill=X, pady=(0, 6))
         row = Frame(step1)
@@ -1704,7 +1750,7 @@ class App:
         self.region_profile_description.pack(fill=X, padx=10, pady=(0, 8))
 
         # Step 2 — Budget
-        step2 = ttk.LabelFrame(left, text=tr(self.lang, "region_step_budget"))
+        step2 = ttk.LabelFrame(left_1, text=tr(self.lang, "region_step_budget"))
         self.translated.append((step2, "region_step_budget", "text"))
         step2.pack(fill=X, pady=(0, 6))
         budget_grid = Frame(step2)
@@ -1722,7 +1768,7 @@ class App:
         Label(rem_row, textvariable=self.region_remaining_var, fg=Theme.ACCENT, bg=self._parent_bg(rem_row)).pack(side=LEFT, padx=6)
 
         # Step 3 — Selection Tools
-        step3 = ttk.LabelFrame(left, text=tr(self.lang, "region_step_selection"))
+        step3 = ttk.LabelFrame(left_1, text=tr(self.lang, "region_step_selection"))
         self.translated.append((step3, "region_step_selection", "text"))
         step3.pack(fill=X, pady=(0, 6))
         tool_row = Frame(step3)
@@ -1780,8 +1826,8 @@ class App:
         self.region_save_json_btn2 = self._button(dup_row, "region_save_result_json", self._region_save_result_json, state="disabled")
         self.region_save_json_btn2.pack(side=LEFT, padx=6, fill=X, expand=True)
 
-        # Step 4 — Actions
-        step4 = ttk.LabelFrame(left_outer, text=tr(self.lang, "region_step_actions"))
+        # Step 4 — Actions (inside scrollable area)
+        step4 = ttk.LabelFrame(left_2, text=tr(self.lang, "region_step_actions"))
         self.translated.append((step4, "region_step_actions", "text"))
         step4.pack(fill=X)
         actions = Frame(step4)
@@ -1797,15 +1843,21 @@ class App:
         Label(status_row, textvariable=self.region_status, fg=Theme.MUTED, bg=self._parent_bg(status_row), anchor="w", wraplength=180).pack(side=LEFT)
         Label(status_row, textvariable=self.region_progress, fg=Theme.ACCENT, bg=self._parent_bg(status_row), font=("Segoe UI", 9), anchor="e", wraplength=180).pack(side=RIGHT)
 
-        # Pass History
-        hist = ttk.LabelFrame(left_outer, text=tr(self.lang, "region_pass_history"))
+        # Pass History (inside scrollable area)
+        hist = ttk.LabelFrame(left_2, text=tr(self.lang, "region_pass_history"))
         self.translated.append((hist, "region_pass_history", "text"))
         hist.pack(fill=X, pady=(6, 0))
-        self.region_pass_list = Listbox(hist, height=4)
-        self.region_pass_list.pack(fill=X, padx=10, pady=(4, 8))
+        self.region_pass_list = Listbox(hist, height=4, exportselection=False)
+        self.region_pass_list.pack(fill=X, padx=10, pady=(4, 4))
+        self.region_pass_list.bind("<<ListboxSelect>>", self._region_on_checkpoint_select)
+        # Restore button
+        ckpt_row = Frame(hist)
+        ckpt_row.pack(fill=X, padx=10, pady=(0, 8))
+        self.region_restore_btn = self._button(ckpt_row, "region_restore_checkpoint", self._region_restore_checkpoint, state="disabled")
+        self.region_restore_btn.pack(side=LEFT)
 
-        # Result actions
-        result_row = Frame(left_outer)
+        # Result actions (inside scrollable area)
+        result_row = Frame(left_2)
         result_row.pack(fill=X, pady=(4, 0))
         self.region_open_folder_btn = self._button(result_row, "region_open_result_folder", self._region_open_result_folder, state="disabled")
         self.region_open_folder_btn.pack(side=LEFT, fill=X, expand=True)
@@ -2534,6 +2586,15 @@ class App:
         self.region_save_json_btn.config(state=enabled)
         self.region_open_folder_btn2.config(state=enabled)
         self.region_save_json_btn2.config(state=enabled)
+        # Restore button: enabled when a non-active checkpoint is selected
+        restore_ok = False
+        if has_output and not running:
+            sel = self.region_pass_list.curselection()
+            if sel:
+                sel_idx = sel[0]
+                if sel_idx != self._region_active_checkpoint_index:
+                    restore_ok = True
+        self.region_restore_btn.config(state="normal" if restore_ok else "disabled")
         # Heatmap tab: only clickable when a heatmap exists
         has_heatmap = bool(self._region_heatmap_showing)
         if self.region_tab_heatmap_btn:
@@ -2747,6 +2808,10 @@ class App:
 
             result = finalize_first_pass(prep)
             result["preview_path"] = prep.get("preview_png", "")
+            # Propagate checkpoint paths for UI
+            result["checkpoint_json"] = result.get("checkpoint_json", "")
+            result["checkpoint_preview"] = result.get("checkpoint_preview", "")
+            result["checkpoint_heatmap"] = result.get("checkpoint_heatmap", "")
             # Generate heatmap from the resulting geometry JSON
             try:
                 base_json = Path(prep["base_json"])
@@ -2896,6 +2961,10 @@ class App:
 
             result = finalize_region_pass(prep)
             result["preview_path"] = prep.get("preview_png", "")
+            # Propagate checkpoint paths for UI
+            result["checkpoint_json"] = result.get("checkpoint_json", "")
+            result["checkpoint_preview"] = result.get("checkpoint_preview", "")
+            result["checkpoint_heatmap"] = result.get("checkpoint_heatmap", "")
             # Generate heatmap from the resulting geometry JSON
             try:
                 base_json = Path(prep["base_json"])
@@ -2916,6 +2985,95 @@ class App:
         self.shutdown_event.set()
         self.region_status.set(tr(self.lang, "stopped"))
         self.region_workflow_running = False
+        self._region_update_button_states()
+
+    # ==================================================================
+    # Region Paint — Checkpoint selection & rollback
+    # ==================================================================
+
+    def _region_on_checkpoint_select(self, _event=None):
+        """Handle Listbox selection: enable/disable restore button."""
+        self._region_update_button_states()
+
+    def _region_restore_checkpoint(self):
+        """Switch to the selected checkpoint (non-destructive — all checkpoints are preserved)."""
+        sel = self.region_pass_list.curselection()
+        if not sel:
+            return
+        sel_idx = sel[0]
+        if sel_idx < 0 or sel_idx >= len(self._region_checkpoint_data):
+            return
+        entry = self._region_checkpoint_data[sel_idx]
+        if entry.get("is_active"):
+            self.log_line("Region Paint: already at this checkpoint.")
+            return
+
+        try:
+            result = region_restore_checkpoint(self.region_current_output_dir, sel_idx)
+        except Exception as exc:
+            self.log_line(f"Region Paint: restore failed — {exc}")
+            return
+
+        if not result.get("ok"):
+            self.log_line(f"Region Paint: restore failed — {result.get('error', 'unknown')}")
+            return
+
+        # Update preview
+        preview_path = result.get("preview_png")
+        if preview_path and Path(preview_path).exists():
+            self._region_preview_showing = str(preview_path)
+            if self._region_right_tab == "preview":
+                self._region_display_preview(Path(preview_path))
+
+        # Update heatmap
+        heatmap_path = result.get("heatmap_png")
+        if heatmap_path and Path(heatmap_path).exists():
+            self._region_heatmap_showing = str(heatmap_path)
+            if self._region_right_tab == "heatmap":
+                self._region_display_heatmap(Path(heatmap_path))
+            if self.region_tab_heatmap_btn:
+                self.region_tab_heatmap_btn.config(fg=Theme.TEXT, cursor="hand2")
+
+        # Refresh pass list to reflect the new active checkpoint
+        try:
+            status = region_get_status(self.region_current_output_dir)
+            active_idx = status.get("active_checkpoint_index", -1)
+            self._region_active_checkpoint_index = active_idx
+            checkpoints = status.get("passes", [])
+            self._region_checkpoint_data = []
+            self.region_pass_list.delete(0, END)
+            for i, cp in enumerate(checkpoints):
+                pn = cp.get("pass_num", i + 1)
+                att = cp.get("attempt", 1)
+                ly = cp.get("layers", 0)
+                is_first = not cp.get("mask")
+                pass_type = "first pass" if is_first else "region"
+                label = f"Pass {pn} (att {att}): {ly} layers — {pass_type}"
+                if i == active_idx:
+                    label += "  ◀ " + tr(self.lang, "region_checkpoint_active")
+                self.region_pass_list.insert(END, label)
+                self._region_checkpoint_data.append({
+                    "index": i,
+                    "pass_num": pn,
+                    "attempt": att,
+                    "layers": ly,
+                    "json_path": cp.get("json", ""),
+                    "preview_path": cp.get("preview", ""),
+                    "heatmap_path": cp.get("heatmap", ""),
+                    "is_active": i == active_idx,
+                })
+                if i == active_idx:
+                    self.region_pass_list.selection_set(i)
+            self.region_remaining_var.set(str(status.get("remaining", 0)))
+        except Exception:
+            pass
+
+        ckpt = result.get("checkpoint", {})
+        self.log_line(
+            f"Region Paint: restored to Pass {ckpt.get('pass_num', '?')} "
+            f"(attempt {ckpt.get('attempt', '?')}) "
+            f"— {ckpt.get('layers', 0)} layers"
+        )
         self._region_update_button_states()
 
     def _region_display_preview(self, preview_path: Path):
@@ -5083,33 +5241,53 @@ class App:
                     self.region_progress.set("")
                     if result.get("new_total"):
                         self.region_progress.set(f"Total layers: {result['new_total']}")
-                    # Refresh pass history
+                    # Refresh pass history from state manager
                     pass_label = "complete"
                     if self.region_current_output_dir:
                         try:
                             status = region_get_status(self.region_current_output_dir)
+                            checkpoints = status.get("passes", [])
+                            active_idx = status.get("active_checkpoint_index", -1)
+                            self._region_active_checkpoint_index = active_idx
+                            self._region_checkpoint_data = []
                             self.region_pass_list.delete(0, END)
-                            for i, p in enumerate(status.get("passes", []), 1):
-                                label = f"#{i}: {p.get('layers', 0)} layers"
-                                if p.get("mask"):
-                                    label += " (region)"
-                                else:
-                                    label += " (first pass)"
+                            for i, entry in enumerate(checkpoints):
+                                pn = entry.get("pass_num", i + 1)
+                                att = entry.get("attempt", 1)
+                                ly = entry.get("layers", 0)
+                                is_first = not entry.get("mask")
+                                pass_type = "first pass" if is_first else "region"
+                                # Build display label
+                                label = f"Pass {pn} (att {att}): {ly} layers — {pass_type}"
+                                if i == active_idx:
+                                    label += "  ◀ " + tr(self.lang, "region_checkpoint_active")
                                 self.region_pass_list.insert(END, label)
+                                self._region_checkpoint_data.append({
+                                    "index": i,
+                                    "pass_num": pn,
+                                    "attempt": att,
+                                    "layers": ly,
+                                    "json_path": entry.get("json", ""),
+                                    "preview_path": entry.get("preview", ""),
+                                    "heatmap_path": entry.get("heatmap", ""),
+                                    "is_active": i == active_idx,
+                                })
+                                # Highlight active checkpoint
+                                if i == active_idx:
+                                    self.region_pass_list.selection_set(i)
                             # Capture last pass info for logging
-                            passes = status.get("passes", [])
-                            if passes:
-                                last = passes[-1]
+                            if checkpoints:
+                                last = checkpoints[-1]
                                 pass_type = "region pass" if last.get("mask") else "first pass"
-                                pass_label = f"Pass #{len(passes)} {pass_type} complete — {last.get('layers', 0)} layers"
+                                pass_label = f"Pass #{last.get('pass_num', len(checkpoints))} (att {last.get('attempt', 1)}) {pass_type} complete — {last.get('layers', 0)} layers"
                             self.region_remaining_var.set(str(status.get("remaining", 0)))
                         except Exception:
                             pass
                     self.log_line(f"Region Paint: {pass_label}")
-                    # Auto-clear mask first (same as pressing "Clear Mask" button)
+                    # Auto-clear mask
                     self._region_clear_mask()
-                    # Show preview if available
-                    preview_path = result.get("preview_path")
+                    # Show preview if available — prefer checkpoint preview
+                    preview_path = result.get("checkpoint_preview") or result.get("preview_path")
                     if not preview_path:
                         preview_path = Path(self.region_current_output_dir) / "preview.png"
                     else:
@@ -5118,17 +5296,15 @@ class App:
                         if self._region_right_tab == "preview":
                             self._region_display_preview(preview_path)
                         else:
-                            # Cache preview so it's ready when user switches tab
                             self._region_preview_showing = str(preview_path)
-                    # Handle heatmap
-                    heatmap_path = result.get("heatmap_path")
+                    # Handle heatmap — prefer checkpoint heatmap
+                    heatmap_path = result.get("checkpoint_heatmap") or result.get("heatmap_path")
                     if heatmap_path:
                         heatmap_p = Path(heatmap_path)
                         if heatmap_p.exists():
                             if self._region_right_tab == "heatmap":
                                 self._region_display_heatmap(heatmap_p)
                             else:
-                                # Cache the path so it's ready on tab switch
                                 self._region_heatmap_showing = str(heatmap_p)
                             if self.region_tab_heatmap_btn:
                                 self.region_tab_heatmap_btn.config(fg=Theme.TEXT, cursor="hand2")

@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.9.1 / 2026-06-17
+
+- **Region Paint checkpoints** — Every pass (First Pass and each Paint Selected Region) now saves an independent checkpoint JSON, preview, and heatmap under `checkpoints/` with unique `passN_attemptM` naming. Users can freely switch between any past checkpoint via the Pass History list without losing data.
+  - Re-running the same pass after a rollback creates a new attempt instead of overwriting the previous result.
+  - Select any checkpoint in the Pass History list and click "Restore Checkpoint" to instantly switch the active state, preview, and heatmap.
+  - Switching checkpoints is non-destructive — all historical snapshots are preserved on disk.
+  - Step 4 actions, Pass History, and result buttons are now in a separate scrollable area below Steps 1–3 for better small-screen usability.
+
 ## v1.9.0 / 2026-06-14
 
 - **Text Vinyl** — New Text tab for generating FH6 typecode JSON from typed Unicode text. Supports Latin, Japanese, Korean, and Chinese (Simplified/Traditional) script panels with localized UI (English, Spanish, Portuguese, Simplified/Traditional Chinese, Korean).

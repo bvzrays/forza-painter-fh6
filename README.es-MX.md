@@ -16,7 +16,7 @@
 </p>
 
 <p align="center">
-  <code>v1.8.4</code> · <code>Windows</code> · <code>Forza Horizon 6</code> · <code>GPU/OpenCL</code> · <code>EXE de un solo archivo</code>
+  <code>v1.9.1</code> · <code>Windows</code> · <code>Forza Horizon 6</code> · <code>GPU/OpenCL</code> · <code>EXE de un solo archivo</code>
 </p>
 
 <p align="center">
@@ -27,7 +27,7 @@
 
 Convierte imágenes PNG/JPG/BMP en capas de Grupo de Vinilo para Forza Horizon 6. La aplicación integra la generación, la vista previa y la importación en una sola ventana de escritorio; los usuarios normales no necesitan Python, `.venv`, archivos batch ni direcciones de memoria manuales.
 
-> **Descarga el EXE:** obtén `forza-painter-fh6-v1.8.4.exe` desde [Releases](https://github.com/bvzrays/forza-painter-fh6/releases) y ejecútalo directamente.
+> **Descarga el EXE:** obtén `forza-painter-fh6-v1.9.1.exe` desde [Releases](https://github.com/bvzrays/forza-painter-fh6/releases) y ejecútalo directamente.
 
 > **Preset Market:** explora imágenes compartidas, presets y paquetes JSON en https://painter6.com o usa el nuevo banner del mercado dentro de la aplicación.
 
@@ -46,7 +46,7 @@ Convierte imágenes PNG/JPG/BMP en capas de Grupo de Vinilo para Forza Horizon 6
 
 ## Inicio rápido
 
-1. Descarga `forza-painter-fh6-v1.8.4.exe` desde [Releases](https://github.com/bvzrays/forza-painter-fh6/releases).
+1. Descarga `forza-painter-fh6-v1.9.1.exe` desde [Releases](https://github.com/bvzrays/forza-painter-fh6/releases).
 2. Coloca el EXE en una carpeta normal con permisos de escritura, por ejemplo `Desktop\forza-painter-fh6`.
 3. Haz doble clic en el EXE. Para importar a FH6, ejecútalo como administrador si Windows bloquea el acceso al proceso.
 4. En FH6, abre `Create Vinyl Group` / `Vinyl Group Editor`, carga una plantilla de esferas y luego usa `Ungroup`.
@@ -163,6 +163,13 @@ Estas carpetas pueden eliminarse cuando la app esté cerrada si quieres restable
 ## Changelog
 
 Aquí solo se conservan las entradas de versiones publicadas. Consulta [CHANGELOG.md](CHANGELOG.md) para ver el changelog que muestra el aviso de actualización de la app.
+### v1.9.1 / 2026-06-17
+
+- **Puntos de control en Region Paint** — Cada pase (Primer Pase y cada Pintar Región Seleccionada) ahora guarda un JSON de punto de control independiente, vista previa y mapa de calor. Cambie libremente entre cualquier punto de control pasado desde el Historial de Pases sin perder datos.
+  - Volver a ejecutar el mismo pase después de restaurar crea un nuevo intento sin sobrescribir el anterior.
+  - Seleccione cualquier punto de control y haga clic en "Restaurar Punto de Control" para cambiar instantáneamente el estado activo, la vista previa y el mapa de calor.
+  - Las acciones del Paso 4, el Historial de Pases y los botones de resultado ahora están en un área desplazable separada debajo de los Pasos 1–3 para mejor usabilidad en pantallas pequeñas.
+
 ### v1.9.0 / 2026-06-14
 
 - **Text Vinyl** — Nueva pestaña Text para generar JSON de código de tipo FH6 a partir de texto Unicode. Soporta latín, japonés, coreano y chino (simplificado/tradicional) con interfaz localizada.
