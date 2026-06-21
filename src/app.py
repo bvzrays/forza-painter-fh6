@@ -20,7 +20,7 @@ import zipfile
 from collections import deque
 from datetime import datetime
 from pathlib import Path
-from tkinter import BOTH, BOTTOM, END, HORIZONTAL, LEFT, RIGHT, TclError, X, Button, Canvas, Checkbutton, Entry, Frame, IntVar, Label, Listbox, PhotoImage, Spinbox, StringVar, Text, Tk, Toplevel, filedialog, messagebox, ttk
+from tkinter import BOTH, BOTTOM, END, HORIZONTAL, LEFT, RIGHT, TclError, X, BooleanVar, Button, Canvas, Checkbutton, Entry, Frame, IntVar, Label, Listbox, PhotoImage, Spinbox, StringVar, Text, Tk, Toplevel, filedialog, messagebox, ttk
 
 import psutil
 
@@ -914,6 +914,7 @@ class App:
         self.region_layers_var = StringVar(value="300")
         self.region_remaining_var = StringVar(value="2000")
         self.region_tool = StringVar(value="rect")
+        self.region_exclude_mode = BooleanVar(value=False)
         self.region_shapes: list[dict] = []
         self.region_selected_index: int | None = None
         self.region_rotation_var = IntVar(value=0)
@@ -1812,6 +1813,30 @@ class App:
         self.region_rotation_label.bind("<Return>", self._region_rotation_entry_apply)
         self.region_rotation_label.bind("<FocusOut>", self._region_rotation_entry_apply)
 
+        # Exclude mode checkbox + toggle button for selected shape
+        exclude_row = Frame(step3)
+        exclude_row.pack(fill=X, padx=10, pady=(0, 4))
+        self._region_exclude_cb = Checkbutton(
+            exclude_row,
+            text=tr(self.lang, "region_exclude_mode"),
+            variable=self.region_exclude_mode,
+            command=self._region_on_exclude_mode_changed,
+            bg=self._parent_bg(exclude_row),
+            fg=Theme.TEXT,
+            selectcolor=Theme.INPUT,
+            activebackground=self._parent_bg(exclude_row),
+            activeforeground=Theme.TEXT,
+            font=("Segoe UI", 9),
+        )
+        self._region_exclude_cb.pack(side=LEFT)
+        self.translated.append((self._region_exclude_cb, "region_exclude_mode", "text"))
+        self._region_toggle_exclude_btn = self._button(
+            exclude_row, "region_toggle_exclude",
+            self._region_toggle_selected_exclude,
+            state="disabled",
+        )
+        self._region_toggle_exclude_btn.pack(side=LEFT, padx=(8, 0))
+
         # Duplicate result buttons inside scrollable area for small screens
         hint_row = Frame(step3)
         hint_row.pack(fill=X, padx=10, pady=(2, 0))
@@ -2014,6 +2039,21 @@ class App:
         self.region_tool.set(tool)
         self.region_canvas.configure(cursor="cross")
 
+    def _region_on_exclude_mode_changed(self):
+        """When the exclude mode checkbox is toggled, update the selected shape if any."""
+        if self.region_selected_index is not None and self.region_selected_index < len(self.region_shapes):
+            self.region_shapes[self.region_selected_index]["exclude"] = self.region_exclude_mode.get()
+            self._region_redraw_overlay()
+
+    def _region_toggle_selected_exclude(self):
+        """Toggle the exclude flag on the currently selected shape."""
+        if self.region_selected_index is not None and self.region_selected_index < len(self.region_shapes):
+            shape = self.region_shapes[self.region_selected_index]
+            shape["exclude"] = not shape.get("exclude", False)
+            # Sync checkbox to match the toggled shape's state
+            self.region_exclude_mode.set(shape["exclude"])
+            self._region_redraw_overlay()
+
     def _region_get_canvas_scale(self) -> float:
         """Compute scale factor: canvas-display-pixels / working-pixels."""
         if not self.region_images:
@@ -2158,6 +2198,8 @@ class App:
             self.region_rotation_display.set(f"{angle}°")
             self.region_rotation_slider.config(state="normal")
             self.region_rotation_label.config(state="normal")
+            # Sync exclude checkbox to selected shape
+            self.region_exclude_mode.set(shape.get("exclude", False))
             self.region_drag_mode = "move"
             self.region_drag_start = (event.x, event.y)
             self._region_move_snapshot = list(shape["coords"])
@@ -2291,7 +2333,7 @@ class App:
                 # Normalize so x1<=x2, y1<=y2 regardless of drag direction
                 x1, x2 = min(x1, x2), max(x1, x2)
                 y1, y2 = min(y1, y2), max(y1, y2)
-                self.region_shapes.append({"tool": tool, "coords": [x1, y1, x2, y2], "rotation": 0})
+                self.region_shapes.append({"tool": tool, "coords": [x1, y1, x2, y2], "rotation": 0, "exclude": self.region_exclude_mode.get()})
             if self.region_rubber_id:
                 self.region_canvas.delete(self.region_rubber_id)
                 self.region_rubber_id = None
@@ -2360,7 +2402,13 @@ class App:
                 hh = (y2 - y1) / 2.0
                 rotation = shape.get("rotation", 0)
                 is_selected = (i == self.region_selected_index)
-                fill_color = (0, 0, 255, 100) if is_selected else (0, 0, 255, 80)  # BGR+A in cv2 space → RGBA later
+                is_exclude = shape.get("exclude", False)
+                if is_exclude:
+                    # Exclude shapes: semi-transparent black (BGR+A in cv2 space)
+                    fill_color = (40, 40, 40, 120) if is_selected else (20, 20, 20, 100)
+                else:
+                    # Include shapes: semi-transparent red (BGR+A in cv2 space)
+                    fill_color = (0, 0, 255, 100) if is_selected else (0, 0, 255, 80)
                 # Note: cv2 uses BGR order, we'll convert later
                 if tool == "rect":
                     if rotation != 0:
@@ -2410,7 +2458,11 @@ class App:
                     x1, x2 = sorted([x1, x2])
                     y1, y2 = sorted([y1, y2])
                     is_selected = (i == self.region_selected_index)
-                    fill = (255, 0, 0, 100) if is_selected else (255, 0, 0, 80)
+                    is_exclude = shape.get("exclude", False)
+                    if is_exclude:
+                        fill = (20, 20, 20, 120) if is_selected else (10, 10, 10, 100)
+                    else:
+                        fill = (255, 0, 0, 100) if is_selected else (255, 0, 0, 80)
                     if tool == "rect":
                         draw.rectangle([x1, y1, x2, y2], fill=fill)
                     else:
@@ -2595,6 +2647,11 @@ class App:
                 if sel_idx != self._region_active_checkpoint_index:
                     restore_ok = True
         self.region_restore_btn.config(state="normal" if restore_ok else "disabled")
+        # Toggle exclude button: enabled when a shape is selected and not running
+        has_selection = self.region_selected_index is not None
+        self._region_toggle_exclude_btn.config(
+            state="normal" if has_selection and not running else "disabled"
+        )
         # Heatmap tab: only clickable when a heatmap exists
         has_heatmap = bool(self._region_heatmap_showing)
         if self.region_tab_heatmap_btn:
