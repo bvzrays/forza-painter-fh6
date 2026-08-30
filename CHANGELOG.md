@@ -7,6 +7,13 @@
   - The choice is stored in `runtime/settings/ui_preferences.json` and also applies to the `Region Paint` passes, which use the same generator.
   - The requested card is written to the log right before each run, next to the generator's own `OpenCL: Selected device` line, so the two can be compared.
   - AMD cards are pinned with `GPU_DEVICE_ORDINAL` and NVIDIA cards with `CUDA_VISIBLE_DEVICES`. Intel exposes no device selector, so an Intel GPU can be listed but not forced; the app says so in the log and lets the generator choose.
+- **Parallel image generation** — `Generate JSON` step 2 gained a `Parallel images` selector (1-4, default 1). With more than one image queued, that many generators run at once instead of strictly one after another.
+  - Why it helps: each generator alternates a single-threaded CPU sampling phase with a GPU evaluation phase. Profiling the bundled generator showed roughly 57% of every layer on the GPU and 43% on the CPU, with the process using only ~0.6 of 16 cores, so a single run leaves the GPU idle between layers. Overlapping images fills those gaps.
+  - Measured on an RX 9070 XT with three copies of one image at 200 layers: 24.8s sequential vs 11.6s at 3 parallel (~2x). Two parallel measured ~1.5x.
+  - Default 1 keeps the previous behaviour exactly, including the per-layer ETA. Above 1 the ETA is replaced by an image counter, because parallel jobs interleave their layer numbers, and log lines are prefixed with the image name.
+  - `Stop current generation` now terminates every running generator, not just the most recently started one.
+  - This does **not** speed up a single image. The idle gap inside one generator can only be closed upstream, in `forza-painter-geometrize-go`, by overlapping the sampling of layer N+1 with the GPU evaluation of layer N.
+  - Note: `maxThreads` in the settings profiles has no measurable effect (tested 0/1/4/8/16/32 — all within noise), and neither do `previewEvery`, `saveEvery`, `posterizeLevels`, or the sample counts. `errorGridSize = 196` is measurably slower than `64`.
 
 ## v1.9.5 / 2026-07-04
 
