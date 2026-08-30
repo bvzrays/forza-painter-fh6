@@ -85,9 +85,10 @@ Do not download GitHub's automatic `Source code` ZIP unless you are developing t
 1. Open the `Generate JSON` page.
 2. Click `Add images` and choose PNG/JPG/BMP images.
 3. Select a quality preset.
-4. Optional: enable `Use custom settings` to change output layers, resolution, random samples, and mutated samples.
-5. Click the fixed bottom `Start generating` button.
-6. Wait for the preview and logs to update.
+4. Optional: pick a `Graphics card`. `Automatic (best GPU)` lets the generator choose; select a card to pin generation to it, for example to keep it off the GPU that runs the game.
+5. Optional: enable `Use custom settings` to change output layers, resolution, random samples, and mutated samples.
+6. Click the fixed bottom `Start generating` button.
+7. Wait for the preview and logs to update.
 
 Generated files are saved beside the source image, for example `image.500.json`, `image.1000.json`, and `image.3000.json`.
 
@@ -168,6 +169,7 @@ These folders can be deleted when the app is closed if you want to reset local r
 
 - **EXE will not import into FH6:** close the app and run the EXE as administrator.
 - **GPU/OpenCL error:** update NVIDIA/AMD/Intel graphics drivers. The bundled generator uses OpenCL.
+- **Graphics card list is empty or a card is missing:** the app lists the cards the OpenCL ICD loader reports. Update the graphics drivers, then click `Refresh GPUs`. Intel GPUs can be listed but not pinned, because the Intel runtime exposes no device selector.
 - **Template cannot be located:** confirm you are in Vinyl Group Editor, the template is ungrouped, the layer count is exact, and the menu was not changed during scanning.
 - **Imported result is blurry:** use a higher-layer JSON or increase `Output layers` / `Random samples`.
 - **Need help debugging:** use `Export detailed log` in the app and attach the log to an issue.

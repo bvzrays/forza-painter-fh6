@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **Graphics card picker** — `Generate JSON` step 2 has a `Graphics card` selector next to the quality profile. `Automatic (best GPU)` keeps the previous behaviour (the generator picks the discrete card with the most VRAM); choosing a specific card pins the bundled generator to it. Useful on multi-GPU machines to keep generation off the card that is running the game.
+  - Cards are detected through the OpenCL ICD loader, so the list matches what the generator itself can see, and duplicates from multiple registered ICDs are collapsed.
+  - The choice is stored in `runtime/settings/ui_preferences.json` and also applies to the `Region Paint` passes, which use the same generator.
+  - The requested card is written to the log right before each run, next to the generator's own `OpenCL: Selected device` line, so the two can be compared.
+  - AMD cards are pinned with `GPU_DEVICE_ORDINAL` and NVIDIA cards with `CUDA_VISIBLE_DEVICES`. Intel exposes no device selector, so an Intel GPU can be listed but not forced; the app says so in the log and lets the generator choose.
+
 ## v1.9.5 / 2026-07-04
 
 - **Rollback v1.9.4 changes** — Reverted multi-shape generation & import (rectangle/triangle support), expanded custom settings UI, and related preset updates. These features introduced regressions and have been rolled back to restore the v1.9.2 stable behavior.

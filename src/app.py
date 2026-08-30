@@ -34,6 +34,7 @@ from fh6_vinyl_resources import load_vinyl_polygons
 from game_profiles import PROFILES
 from geometry_json import RECTANGLE, ROTATED_ELLIPSE, load_normalized_geometry
 from generator_backend import GENERATOR_EXE, GENERATOR_JSON_SCAN_SECONDS, GENERATOR_POLL_SLEEP_SECONDS, GENERATOR_PREVIEW_SCAN_SECONDS, USER_SETTINGS_DIR, best_geometry_jsons, build_generator_command, build_generator_env, generated_jsons, generated_preview_files, generator_preview_path, load_settings, preprocess_input_image, write_custom_settings, write_user_settings_preset
+from gpu_devices import device_env_overrides, find_device, find_device_by_label, list_gpu_devices
 from region_painter.state_manager import StateManager
 from region_painter.workflow import (
     finalize_first_pass,
@@ -43,6 +44,7 @@ from region_painter.workflow import (
     prepare_region_pass,
     restore_checkpoint as region_restore_checkpoint,
 )
+from ui_preferences import load_ui_preferences, save_ui_preferences
 from version import APP_DISPLAY_NAME, __version__, app_title
 
 
@@ -889,6 +891,10 @@ class App:
         self.status = StringVar(value=tr(self.lang, "ready"))
         self.progress_text = StringVar(value="")
         self.selected_profile = StringVar()
+        self.selected_gpu = StringVar()
+        self.selected_gpu_key = str(load_ui_preferences().get("generator_gpu_device") or "")
+        self.gpu_devices = []
+        self.gpu_scan_done = False
         self.selected_game = StringVar(value="fh6")
         self.selected_pid = StringVar()
         self.layer_count = StringVar()
@@ -958,6 +964,7 @@ class App:
         for image_path in list(self.images):
             self._load_existing_checkpoints_for_image(image_path)
         self._render_lists()
+        self.refresh_gpu_devices()
         self.log_line(tr(self.lang, "runtime_location").format(runtime=ROOT / "runtime", probe=PROBE_DIR.parent))
         self._poll_queue()
         self.root.after(1000, self.start_update_check)
@@ -1575,6 +1582,22 @@ class App:
         )
         self.profile_combo.pack(side=LEFT, fill=X, expand=True, padx=(8, 0))
         self.profile_combo.bind("<<ComboboxSelected>>", self._update_setting_description)
+        gpu_row = Frame(step2)
+        gpu_row.pack(fill=X, padx=10, pady=(6, 2))
+        self._label(gpu_row, "gpu_device").pack(side=LEFT)
+        self.gpu_combo = ttk.Combobox(
+            gpu_row,
+            values=[],
+            textvariable=self.selected_gpu,
+            state="readonly",
+            width=24,
+        )
+        self.gpu_combo.pack(side=LEFT, fill=X, expand=True, padx=(8, 0))
+        self.gpu_combo.bind("<<ComboboxSelected>>", self._on_gpu_selected)
+        self._button(gpu_row, "gpu_device_refresh", self.refresh_gpu_devices).pack(side=LEFT, padx=(8, 0))
+        self.gpu_hint = Label(step2, text="", anchor="w", justify=LEFT, wraplength=500, fg="#555")
+        self.gpu_hint.pack(fill=X, padx=10, pady=(0, 6))
+        self._refresh_gpu_combo()
         preset_actions = Frame(step2)
         preset_actions.pack(fill=X, padx=10, pady=(0, 6))
         self._button(preset_actions, "import_preset", self.import_preset).pack(side=LEFT)
@@ -2792,7 +2815,7 @@ class App:
                 encoding="utf-8",
                 errors="replace",
                 creationflags=flags,
-                env=build_generator_env(),
+                env=self._generator_env(),
             )
             if proc is None:
                 self.queue.put(("region_done", {"ok": False, "error": "Shutdown"}))
@@ -2945,7 +2968,7 @@ class App:
                 encoding="utf-8",
                 errors="replace",
                 creationflags=flags,
-                env=build_generator_env(),
+                env=self._generator_env(),
             )
             if proc is None:
                 self.queue.put(("region_done", {"ok": False, "error": "Shutdown"}))
@@ -3382,6 +3405,7 @@ class App:
                 self.import_preview_label.config(text=tr(self.lang, "preview_hint"))
         if hasattr(self, "advanced_button"):
             self.advanced_button.config(text=tr(self.lang, "hide_advanced" if self.advanced_visible else "show_advanced"))
+        self._refresh_gpu_combo()
         if hasattr(self, "full_shape_notes"):
             self.full_shape_notes.config(state="normal")
             self.full_shape_notes.delete("1.0", END)
@@ -3436,6 +3460,60 @@ class App:
         if not custom["saveAt"] and custom["stopAt"]:
             custom["saveAt"] = custom["stopAt"]
         return custom
+
+    def refresh_gpu_devices(self, _event=None):
+        """Re-scan OpenCL GPUs; the picker updates once the scan finishes."""
+        threading.Thread(target=self._detect_gpu_devices_worker, daemon=True).start()
+
+    def _detect_gpu_devices_worker(self):
+        self.queue.put(("gpu_devices", list_gpu_devices(refresh=True)))
+
+    def _apply_gpu_devices(self, devices):
+        self.gpu_devices = list(devices)
+        self.gpu_scan_done = True
+        if self.selected_gpu_key and not find_device(self.selected_gpu_key, self.gpu_devices):
+            self.selected_gpu_key = ""
+            self._store_gpu_preference()
+            self.log_line(tr(self.lang, "gpu_device_missing"))
+        self._refresh_gpu_combo()
+
+    def _refresh_gpu_combo(self):
+        """Re-fill the graphics card picker from the detected devices."""
+        if not hasattr(self, "gpu_combo"):
+            return
+        auto_label = tr(self.lang, "gpu_device_auto")
+        self.gpu_combo.config(values=[auto_label] + [device.label for device in self.gpu_devices])
+        device = find_device(self.selected_gpu_key, self.gpu_devices)
+        self.selected_gpu.set(device.label if device else auto_label)
+        # Only report "nothing found" once a scan really came back empty.
+        scanned_empty = self.gpu_scan_done and not self.gpu_devices
+        self.gpu_hint.config(text=tr(self.lang, "gpu_device_none" if scanned_empty else "gpu_device_hint"))
+
+    def _on_gpu_selected(self, _event=None):
+        device = find_device_by_label(self.selected_gpu.get(), self.gpu_devices)
+        self.selected_gpu_key = device.key if device else ""
+        self._store_gpu_preference()
+        self.log_line(self._gpu_selection_message(device))
+
+    def _store_gpu_preference(self):
+        prefs = load_ui_preferences()
+        prefs["generator_gpu_device"] = self.selected_gpu_key
+        save_ui_preferences(prefs)
+
+    def _gpu_selection_message(self, device):
+        if device is None:
+            return tr(self.lang, "gpu_device_auto_log")
+        if device.can_be_forced:
+            return tr(self.lang, "gpu_device_forced").format(device=device.label)
+        return tr(self.lang, "gpu_device_unsupported").format(
+            device=device.label, vendor=device.vendor or device.vendor_kind
+        )
+
+    def _generator_env(self):
+        """Sanitized generator environment, pinned to the chosen graphics card."""
+        device = find_device(self.selected_gpu_key, self.gpu_devices)
+        self.queue.put(("log", self._gpu_selection_message(device)))
+        return build_generator_env(device_env_overrides(device, self.gpu_devices))
 
     def save_custom_preset(self):
         setting = self._selected_setting()
@@ -4369,6 +4447,7 @@ class App:
         try:
             self.queue.put(("log", f"Selected profile: {setting['path'].name}"))
             self._log_generation_load_warning(setting)
+            generator_env = self._generator_env()
             for image_path in list(self.images):
                 if self.shutdown_event.is_set():
                     self.queue.put(("status", tr(self.lang, "stopped")))
@@ -4403,7 +4482,7 @@ class App:
                     encoding="utf-8",
                     errors="replace",
                     creationflags=flags,
-                    env=build_generator_env(),
+                    env=generator_env,
                 )
                 if proc is None:
                     self.queue.put(("status", tr(self.lang, "stopped")))
@@ -5260,6 +5339,8 @@ class App:
                 self.show_preview_file(payload)
             elif kind == "render_lists":
                 self._render_lists()
+            elif kind == "gpu_devices":
+                self._apply_gpu_devices(payload)
             elif kind == "update_failed":
                 self._handle_update_failed(payload)
             elif kind == "update_current":
