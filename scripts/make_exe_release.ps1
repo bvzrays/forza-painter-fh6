@@ -28,6 +28,29 @@ if ($LASTEXITCODE -ne 0) {
 & $Python -m pip install -r (Join-Path $Root "requirements.txt")
 & $Python -m pip install -r (Join-Path $Root "requirements-preview.txt")
 
+# `python -m venv` does not copy the Tcl/Tk data directory on Windows, so tkinter
+# cannot start inside the venv. PyInstaller then only warns ("tkinter installation
+# is broken") and drops tkinter, producing an EXE that dies with
+# "No module named 'tkinter'". Point Tcl/Tk at the base installation first.
+if (-not $env:TCL_LIBRARY) {
+    $BasePrefix = (& $Python -c "import sys; print(sys.base_prefix)").Trim()
+    $TclRoot = Join-Path $BasePrefix "tcl"
+    if (Test-Path $TclRoot) {
+        $TclDir = Get-ChildItem -Path $TclRoot -Directory | Where-Object { $_.Name -match '^tcl\d+\.\d+$' } | Select-Object -First 1
+        $TkDir = Get-ChildItem -Path $TclRoot -Directory | Where-Object { $_.Name -match '^tk\d+\.\d+$' } | Select-Object -First 1
+        if ($TclDir -and $TkDir) {
+            $env:TCL_LIBRARY = $TclDir.FullName
+            $env:TK_LIBRARY = $TkDir.FullName
+            Write-Host "Using Tcl/Tk from $($TclDir.FullName)"
+        }
+    }
+}
+
+cmd /c "`"$Python`" -c `"import tkinter; tkinter.Tk().destroy()`" >nul 2>nul"
+if ($LASTEXITCODE -ne 0) {
+    throw "tkinter cannot start under $Python. PyInstaller would silently build an EXE without tkinter. Copy the 'tcl' folder from the base Python into .venv, or set TCL_LIBRARY/TK_LIBRARY, then retry."
+}
+
 if (Test-Path $BuildRoot) {
     Remove-Item -LiteralPath $BuildRoot -Recurse -Force
 }

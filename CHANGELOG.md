@@ -14,6 +14,7 @@
   - `Stop current generation` now terminates every running generator, not just the most recently started one.
   - This does **not** speed up a single image. The idle gap inside one generator can only be closed upstream, in `forza-painter-geometrize-go`, by overlapping the sampling of layer N+1 with the GPU evaluation of layer N.
   - Note: `maxThreads` in the settings profiles has no measurable effect (tested 0/1/4/8/16/32 — all within noise), and neither do `previewEvery`, `saveEvery`, `posterizeLevels`, or the sample counts. `errorGridSize = 196` is measurably slower than `64`.
+- **EXE build fails loudly instead of shipping a broken binary** — `scripts/make_exe_release.ps1` now points Tcl/Tk at the base Python installation and verifies that `tkinter` can start before invoking PyInstaller. `python -m venv` does not copy the Tcl/Tk data directory on Windows, so PyInstaller only warned (`tkinter installation is broken. It will be excluded from the application`), exited 0, and produced an EXE that died on launch with `No module named 'tkinter'`.
 
 ## v1.9.5 / 2026-07-04
 
