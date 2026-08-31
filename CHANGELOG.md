@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v1.9.6 / 2026-08-31
 
 - **Graphics card picker** — `Generate JSON` step 2 has a `Graphics card` selector next to the quality profile. `Automatic (best GPU)` keeps the previous behaviour (the generator picks the discrete card with the most VRAM); choosing a specific card pins the bundled generator to it. Useful on multi-GPU machines to keep generation off the card that is running the game.
   - Cards are detected through the OpenCL ICD loader, so the list matches what the generator itself can see, and duplicates from multiple registered ICDs are collapsed.
