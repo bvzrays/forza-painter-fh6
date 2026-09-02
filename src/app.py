@@ -4549,13 +4549,22 @@ class App:
                     image_path = pending.get_nowait()
                 except queue.Empty:
                     return
-                outcome = self._run_one_generation(
-                    image_path,
-                    setting,
-                    generator_env,
-                    prefix=f"[{image_path.name}] ",
-                    track_eta=False,
-                )
+                try:
+                    outcome = self._run_one_generation(
+                        image_path,
+                        setting,
+                        generator_env,
+                        prefix=f"[{image_path.name}] ",
+                        track_eta=False,
+                    )
+                except Exception as exc:
+                    # Nothing may escape a job thread: the outcome would be
+                    # missing and the run would report success for an image that
+                    # was never generated. The sequential path is covered by the
+                    # handler in _generate_worker, which a thread cannot reach.
+                    self._record_detail(f"GENERATION EXCEPTION for {image_path}: {exc!r}")
+                    self.queue.put(("log", f"[{image_path.name}] Generation failed: {exc}"))
+                    outcome = "failed"
                 with outcomes_lock:
                     outcomes.append(outcome)
                     finished = len(outcomes)
@@ -4571,6 +4580,12 @@ class App:
             runner.join()
         if self.shutdown_event.is_set() or "stopped" in outcomes:
             return "stopped"
+        if len(outcomes) != len(images):
+            # Backstop for anything that could still kill a runner without
+            # leaving an outcome; never report success on a short result set.
+            self.queue.put(("log", tr(self.lang, "parallel_jobs_incomplete").format(
+                done=len(outcomes), total=len(images))))
+            return "failed"
         if "failed" in outcomes:
             return "failed"
         return "done"
