@@ -17,6 +17,8 @@ def _default_preferences() -> Dict[str, Any]:
         "telemetry_compact": True,
         "write_workspace_signature": True,
         "text_import_shape_notice_dismissed": False,
+        "generator_gpu_device": "",
+        "generator_parallel_jobs": 1,
     }
 
 
@@ -33,6 +35,11 @@ def load_ui_preferences() -> Dict[str, Any]:
     prefs["telemetry_compact"] = bool(prefs.get("telemetry_compact", True))
     prefs["write_workspace_signature"] = bool(prefs.get("write_workspace_signature", True))
     prefs["text_import_shape_notice_dismissed"] = bool(prefs.get("text_import_shape_notice_dismissed"))
+    prefs["generator_gpu_device"] = str(prefs.get("generator_gpu_device") or "")
+    try:
+        prefs["generator_parallel_jobs"] = max(1, int(prefs.get("generator_parallel_jobs") or 1))
+    except (TypeError, ValueError):
+        prefs["generator_parallel_jobs"] = 1
     return prefs
 
 

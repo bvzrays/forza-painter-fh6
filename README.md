@@ -85,13 +85,27 @@ Do not download GitHub's automatic `Source code` ZIP unless you are developing t
 1. Open the `Generate JSON` page.
 2. Click `Add images` and choose PNG/JPG/BMP images.
 3. Select a quality preset.
-4. Optional: enable `Use custom settings` to change output layers, resolution, random samples, and mutated samples.
-5. Click the fixed bottom `Start generating` button.
-6. Wait for the preview and logs to update.
+4. Optional: pick a `Graphics card`. `Automatic (best GPU)` lets the generator choose; select a card to pin generation to it, for example to keep it off the GPU that runs the game.
+5. Optional: raise `Parallel images` when several images are queued. See [Parallel images](#parallel-images) below.
+6. Optional: enable `Use custom settings` to change output layers, resolution, random samples, and mutated samples.
+7. Click the fixed bottom `Start generating` button.
+8. Wait for the preview and logs to update.
 
 Generated files are saved beside the source image, for example `image.500.json`, `image.1000.json`, and `image.3000.json`.
 
 One image can generate multiple checkpoint JSON files. Prefer the highest-layer JSON that matches your template; for example, use `image.3000.json` or the final `image.json` with a 3000-layer template. Importing a 500-layer JSON into a 3000-layer template will look blurry.
+
+### Parallel images
+
+The generator alternates a single-threaded CPU phase (picking candidate shapes) with a GPU phase (scoring them), so a single run leaves the GPU idle for roughly 40% of every layer. Running several images at once fills those gaps.
+
+| Parallel images | Throughput |
+| ---: | --- |
+| 1 | baseline |
+| 2 | ~1.5x |
+| 3 | ~1.9x |
+
+Measured on an RX 9070 XT. This only helps when more than one image is queued — a single image takes the same time at any setting. Above 1, the per-layer ETA is replaced by an image counter and each log line is prefixed with the image name. Each parallel job is a separate generator process with its own copy of the image on the GPU, so keep an eye on VRAM with high `maxResolution` presets.
 
 | Preset | Output layers | Random samples | Use case |
 | --- | ---: | ---: | --- |
@@ -168,6 +182,7 @@ These folders can be deleted when the app is closed if you want to reset local r
 
 - **EXE will not import into FH6:** close the app and run the EXE as administrator.
 - **GPU/OpenCL error:** update NVIDIA/AMD/Intel graphics drivers. The bundled generator uses OpenCL.
+- **Graphics card list is empty or a card is missing:** the app lists the cards the OpenCL ICD loader reports. Update the graphics drivers, then click `Refresh GPUs`. Intel GPUs can be listed but not pinned, because the Intel runtime exposes no device selector.
 - **Template cannot be located:** confirm you are in Vinyl Group Editor, the template is ungrouped, the layer count is exact, and the menu was not changed during scanning.
 - **Imported result is blurry:** use a higher-layer JSON or increase `Output layers` / `Random samples`.
 - **Need help debugging:** use `Export detailed log` in the app and attach the log to an issue.

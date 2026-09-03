@@ -130,7 +130,12 @@ def _filtered_path(value):
     return os.pathsep.join(kept)
 
 
-def build_generator_env():
+def build_generator_env(extra_env: dict[str, str] | None = None):
+    """Build the sanitized generator environment.
+
+    *extra_env* is applied after sanitizing, so deliberate overrides such as the
+    GPU device ordinals from :mod:`gpu_devices` survive the drop list.
+    """
     env = {}
     for key, value in os.environ.items():
         upper = key.upper()
@@ -144,6 +149,8 @@ def build_generator_env():
         upper = key.upper()
         if any(upper.startswith(prefix) for prefix in _GENERATOR_ENV_DROP_PREFIXES):
             env.pop(key, None)
+    for key, value in (extra_env or {}).items():
+        env[str(key)] = str(value)
     env["FORZA_PAINTER_GENERATOR_SANITIZED_ENV"] = "1"
     return env
 
