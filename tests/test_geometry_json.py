@@ -97,6 +97,29 @@ class TestDrawableShapeCount:
 
 
 class TestNormalizeColor:
+    @pytest.mark.parametrize("color", [
+        [0.5, 0.25, 1.0],
+        {"r": 0.5, "g": 0.25, "b": 1.0},
+        {"Red": 0.5, "Green": 0.25, "Blue": 1.0},
+    ])
+    def test_normalized_rgb_defaults_to_opaque(self, color):
+        from geometry_json import _normalize_color
+        assert _normalize_color(color) == [128, 64, 255, 255]
+
+    def test_rgb_object_is_not_dropped_from_geometry(self):
+        payload = [{"type": 16, "data": [50, 50, 10, 10, 0],
+                    "color": {"r": 128, "g": 64, "b": 32}}]
+        result = normalize_geometry_payload(payload)
+        assert result["shapes"][1]["color"] == [128, 64, 32, 255]
+
+    @pytest.mark.parametrize("color", [
+        {"r": 128, "g": 64, "b": 32, "a": 0},
+        [128, 64, 32, 0],
+    ])
+    def test_explicit_zero_alpha_is_preserved(self, color):
+        from geometry_json import _normalize_color
+        assert _normalize_color(color) == [128, 64, 32, 0]
+
     def test_normalize_0_1_range(self):
         from geometry_json import _normalize_color
         assert _normalize_color([0.5, 0.5, 0.5, 1.0]) == [128, 128, 128, 255]
