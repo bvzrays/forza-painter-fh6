@@ -169,22 +169,24 @@ def _normalize_color(value):
             _pick(value, "r", "R", "red", "Red"),
             _pick(value, "g", "G", "green", "Green"),
             _pick(value, "b", "B", "blue", "Blue"),
-            _pick(value, "a", "A", "alpha", "Alpha"),
         ]
+        if any(key in value for key in ("a", "A", "alpha", "Alpha")):
+            values.append(_pick(value, "a", "A", "alpha", "Alpha"))
     elif isinstance(value, (list, tuple)):
         values = list(value)
     else:
         return None
     if len(values) < 3:
         return None
-    if len(values) == 3:
-        values.append(255)
     try:
         nums = [float(v) for v in values[:4]]
     except (TypeError, ValueError):
         return None
     if all(0.0 <= v <= 1.0 for v in nums):
         nums = [v * 255.0 for v in nums]
+    # Infer the input range before adding opaque alpha to RGB colors.
+    if len(nums) == 3:
+        nums.append(255)
     return [clamp_byte(v) for v in nums]
 
 
