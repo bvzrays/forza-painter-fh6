@@ -69,7 +69,7 @@ from app_config import (
     Theme,
 )
 
-from utils import load_cv2, load_pillow
+from utils import drop_duplicate_image_names, is_duplicate_image_name, load_cv2, load_pillow
 
 from i18n import tr
 
@@ -909,7 +909,9 @@ class App:
         self.eta_recycle_notice_active = False
         self.closed = False
         self.settings = load_settings()
-        self.images = [Path(path) for path in initial_images if Path(path).exists()]
+        self.images = drop_duplicate_image_names(
+            Path(path) for path in initial_images if Path(path).exists()
+        )
         self.json_files = []
         self.outputs = []
         self.processes = []
@@ -3677,13 +3679,8 @@ class App:
         return added
 
     def _existing_output_jsons(self, image_path):
-        """JSONs already generated for an image, in the legacy and redirected locations."""
-        image_path = Path(image_path)
-        candidates = list(generated_jsons(image_path))
-        working_image = GENERATED_OUTPUT_DIR / image_path.stem / image_path.name
-        if working_image != image_path:
-            candidates.extend(generated_jsons(working_image))
-        return candidates
+        """JSONs already generated for an image, new layout plus legacy locations."""
+        return list(generated_jsons(Path(image_path)))
 
     def _load_existing_checkpoints_for_image(self, image_path, log_to_queue=False):
         existing = best_geometry_jsons(self._existing_output_jsons(image_path))
@@ -4181,19 +4178,34 @@ class App:
             filetypes=[("Images", "*.png *.jpg *.jpeg *.bmp"), ("All files", "*.*")],
         )
         added_paths = []
+        rejected_paths = []
         for item in files:
             path = Path(item)
-            if path.exists() and path not in self.images:
-                self.images.append(path)
-                added_paths.append(path)
-                self._load_existing_checkpoints_for_image(path)
+            if not path.exists() or path in self.images:
+                continue
+            if is_duplicate_image_name(path, self.images):
+                rejected_paths.append(path)
+                continue
+            self.images.append(path)
+            added_paths.append(path)
+            self._load_existing_checkpoints_for_image(path)
         self._render_lists()
+        if rejected_paths:
+            self._warn_duplicate_images(rejected_paths)
         if files:
             self.show_source_preview(Path(files[0]))
         if added_paths:
             existing_added = sum(1 for path in added_paths if self._existing_output_jsons(path))
             if existing_added:
                 self.log_line(tr(self.lang, "cannot_resume_checkpoint"))
+
+    def _warn_duplicate_images(self, rejected_paths):
+        names = ", ".join(dict.fromkeys(path.name for path in rejected_paths))
+        message = tr(self.lang, "duplicate_image_rejected").format(names=names)
+        try:
+            messagebox.showwarning(tr(self.lang, "duplicate_image_name"), message)
+        except Exception:
+            self.log_line(message)
 
     def remove_selected_image(self):
         selection = list(self.image_list.curselection())
@@ -4646,15 +4658,16 @@ class App:
         return "done"
 
     def _prepare_generation_paths(self, image_path):
-        """Copy the source image to image/ and to the out/<stem>/ working dir.
+        """Archive the source under image/<ext>/ and return the generator input.
 
-        The generator derives every output path from its input path, so the
-        copy inside out/<stem>/ keeps all JSON of one image in one folder.
-        Falls back to the original path when the copies cannot be written.
+        The generator reads the archived copy, so out/<stem>/<ext>/ collects
+        all JSON of one image while out/ never holds image files. Falls back
+        to the original path when the archive cannot be written; an archived
+        duplicate with different content raises ValueError.
         """
         source = Path(image_path)
         try:
-            backup, working = prepare_generation_copies(
+            backup, output_folder = prepare_generation_copies(
                 source, GENERATED_IMAGE_DIR, GENERATED_OUTPUT_DIR
             )
         except OSError as exc:
@@ -4662,8 +4675,8 @@ class App:
             return source
         if backup.resolve() != source.resolve():
             self.queue.put(("log", tr(self.lang, "generate_backup_saved").format(path=backup)))
-        self.queue.put(("log", tr(self.lang, "generate_output_folder").format(path=working.parent)))
-        return working
+        self.queue.put(("log", tr(self.lang, "generate_output_folder").format(path=output_folder)))
+        return backup
 
     def _run_one_generation(self, image_path, setting, generator_env, prefix="", track_eta=True):
         """Generate one image. Returns "done", "failed" or "stopped"."""

@@ -4,10 +4,12 @@ import filecmp
 import os
 import re
 import shutil
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable
 
+from app_config import GENERATED_OUTPUT_DIR
 from app_paths import RESOURCE_ROOT, ROOT
 from geometry_json import drawable_shape_count
 from utils import PreprocessError
@@ -357,32 +359,72 @@ def preprocess_input_image(
 
 
 # ---------------------------------------------------------------------------
+# Image naming
+# ---------------------------------------------------------------------------
+
+# The only preprocess mode preprocess_input_image can realize (see
+# preprocess.luma); its variant file is named "<stem>.<mode><ext>".
+REALIZED_PREPROCESS_MODES = ("luma_band",)
+
+
+def image_identity(image_path: str | Path) -> tuple[str, str]:
+    """Naming identity ``(stem, extension)`` of an image.
+
+    The extension is lower-cased without its dot so ``.PNG`` and ``.png``
+    share one backup/output folder. Preprocessed variants such as
+    ``<stem>.luma_band.png`` keep the identity of their base image so every
+    generator output of one image lands in the same place.
+    """
+    image_path = Path(image_path)
+    stem = image_path.stem
+    for mode in REALIZED_PREPROCESS_MODES:
+        if stem.endswith("." + mode):
+            stem = stem[: -len(mode) - 1]
+            break
+    return stem, image_path.suffix.lstrip(".").lower()
+
+
+def generator_output_dir(
+    image_path: str | Path, output_dir: str | Path = GENERATED_OUTPUT_DIR
+) -> Path:
+    """Folder that collects the JSON outputs of one image."""
+    stem, ext = image_identity(image_path)
+    return Path(output_dir) / stem / ext
+
+
+def generator_output_base(
+    image_path: str | Path, output_dir: str | Path = GENERATED_OUTPUT_DIR
+) -> Path:
+    """Base path (without extension) the generator writes its JSONs to."""
+    stem, _ext = image_identity(image_path)
+    return generator_output_dir(image_path, output_dir) / stem
+
+
+# ---------------------------------------------------------------------------
 # Output discovery
 # ---------------------------------------------------------------------------
 
-def generated_jsons(image_path: str | Path) -> list[Path]:
+def generated_jsons(
+    image_path: str | Path, output_dir: str | Path = GENERATED_OUTPUT_DIR
+) -> list[Path]:
+    """JSONs generated for *image_path*, newest first.
+
+    Current layout: ``<output_dir>/<stem>/<ext>/`` holds exactly this image's
+    JSONs. Legacy reads kept for older runs: the shared ``<output_dir>/<stem>/``
+    root, the ``<stem>/`` folder beside the image, and JSONs sitting next to
+    the image itself. Sibling extension folders are never scanned.
+    """
     image_path = Path(image_path)
+    stem, ext = image_identity(image_path)
+    output_dir = Path(output_dir)
     candidates: list[Path] = []
-    output_base = generator_output_base(image_path)
-    folders = {
-        image_path.parent / image_path.stem,
-        output_base.parent / output_base.name,
-    }
-    for folder in folders:
-        if folder.exists():
-            candidates.extend(folder.rglob("*.json"))
-    prefixes = {
-        image_path.stem,
-        image_path.name,
-        output_base.name,
-        image_path.stem.split(".", 1)[0],
-        output_base.name.split(".", 1)[0],
-    }
-    patterns = {f"{prefix}*.json" for prefix in prefixes if prefix}
-    for pattern in patterns:
-        candidates.extend(image_path.parent.glob(pattern))
-        if output_base.parent != image_path.parent:
-            candidates.extend(output_base.parent.glob(pattern))
+    for folder in (output_dir / stem / ext, output_dir / stem):
+        if folder.is_dir():
+            candidates.extend(folder.glob("*.json"))
+    beside_folder = image_path.parent / stem
+    if beside_folder.is_dir():
+        candidates.extend(beside_folder.rglob("*.json"))
+    candidates.extend(image_path.parent.glob(f"{stem}*.json"))
     return sorted(set(candidates), key=lambda p: p.stat().st_mtime, reverse=True)
 
 
@@ -412,31 +454,25 @@ def best_geometry_jsons(paths: Iterable[str | Path]) -> list[Path]:
 # Preview / output helpers
 # ---------------------------------------------------------------------------
 
+def _preview_stem(image_path: str | Path) -> str:
+    stem, ext = image_identity(image_path)
+    return f"{stem}.{ext}" if ext else stem
+
+
 def generator_preview_path(image_path: str | Path) -> Path:
     PREVIEW_DIR.mkdir(parents=True, exist_ok=True)
-    image_path = Path(image_path)
-    return PREVIEW_DIR / f"{_name_without_suffix(image_path)}.preview.png"
+    return PREVIEW_DIR / f"{_preview_stem(image_path)}.preview.png"
 
 
 def generated_preview_files(image_path: str | Path) -> list[Path]:
-    image_path = Path(image_path)
     if not PREVIEW_DIR.exists():
         return []
-    stem = _name_without_suffix(image_path)
+    stem = _preview_stem(image_path)
     return sorted(
         PREVIEW_DIR.glob(f"{stem}.preview*.png"),
         key=lambda p: p.stat().st_mtime,
         reverse=True,
     )
-
-
-def generator_output_base(image_path: str | Path) -> Path:
-    image_path = Path(image_path)
-    return image_path.with_name(_name_without_suffix(image_path))
-
-
-def _name_without_suffix(path: Path) -> str:
-    return path.stem
 
 
 # ---------------------------------------------------------------------------
@@ -463,54 +499,54 @@ def build_generator_command(
 # Generate-page output layout
 # ---------------------------------------------------------------------------
 
-def unique_copy_target(target: Path, source: Path) -> Path:
-    """Return *target*, or the first free ``<stem>-N<ext>`` sibling.
-
-    An existing file whose content matches *source* is reused so that
-    re-generating the same image keeps stable paths instead of piling up
-    identical copies. Files with different content get a numeric suffix so
-    images that share a name never overwrite each other's outputs.
-    """
-    if not target.exists():
-        return target
-    try:
-        if filecmp.cmp(source, target, shallow=False):
-            return target
-    except OSError:
-        return target
-    for index in range(2, 1000):
-        candidate = target.with_name(f"{target.stem}-{index}{target.suffix}")
-        if not candidate.exists():
-            return candidate
-        try:
-            if filecmp.cmp(source, candidate, shallow=False):
-                return candidate
-        except OSError:
-            return candidate
-    return target
+# Serializes lookup → copy → allocate so parallel generations can never select
+# and then overwrite the same archive path (check-then-copy race).
+COPY_ALLOCATION_LOCK = threading.Lock()
 
 
 def prepare_generation_copies(
     source: str | Path, image_dir: Path, output_dir: Path
 ) -> tuple[Path, Path]:
-    """Copy the source image to the backup dir and the generator working dir.
+    """Archive *source* under ``image_dir/<ext>/`` and allocate its output folder.
 
-    Every generator output path is derived from its input path, so running
-    the generator on a copy inside ``output_dir/<stem>/`` collects all JSON
-    checkpoints of one image in that folder. The copy in *image_dir* is the
-    user-facing archive of images that have been generated. Returns
-    ``(backup_path, working_path)``.
+    The generator reads the archived copy directly, so ``out/<stem>/<ext>/``
+    collects all JSON checkpoints of one image while ``out/`` never holds
+    image files. The whole allocation runs under :data:`COPY_ALLOCATION_LOCK`.
+    An archived file with the same name but different content raises
+    :class:`ValueError`; rename one of the images instead of silently forking
+    the outputs. Returns ``(backup_path, output_folder)``.
     """
     source = Path(source)
-    image_dir.mkdir(parents=True, exist_ok=True)
-    working_dir = output_dir / source.stem
-    working_dir.mkdir(parents=True, exist_ok=True)
+    stem, ext = image_identity(source)
+    with COPY_ALLOCATION_LOCK:
+        backup_dir = Path(image_dir) / ext
+        backup = backup_dir / source.name
+        source_resolved = source.resolve()
+        if backup.exists() and backup.resolve() != source_resolved:
+            try:
+                same_content = filecmp.cmp(source, backup, shallow=False)
+            except OSError:
+                same_content = True
+            if not same_content:
+                raise ValueError(
+                    f"image {source.name} is already archived with different "
+                    f"content at {backup}; rename one of the files and retry"
+                )
+        if backup.resolve() != source_resolved:
+            backup_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, backup)
+        _remove_matching_legacy_copy(Path(output_dir) / stem / source.name, backup)
+        output_folder = Path(output_dir) / stem / ext
+        output_folder.mkdir(parents=True, exist_ok=True)
+    return backup, output_folder
 
-    backup = unique_copy_target(image_dir / source.name, source)
-    working = unique_copy_target(working_dir / source.name, source)
-    source_resolved = source.resolve()
-    if backup.resolve() != source_resolved:
-        shutil.copyfile(source, backup)
-    if working.resolve() != source_resolved:
-        shutil.copyfile(source, working)
-    return backup, working
+
+def _remove_matching_legacy_copy(legacy: Path, backup: Path) -> None:
+    """Delete the pre-1.9.6 working copy in out/ when it matches the archive."""
+    if legacy == backup or not legacy.exists():
+        return
+    try:
+        if filecmp.cmp(backup, legacy, shallow=False):
+            legacy.unlink()
+    except OSError:
+        pass

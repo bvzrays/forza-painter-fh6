@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+from pathlib import Path
 from typing import Any, Tuple
 
 
@@ -33,6 +34,49 @@ def parse_int(value: Any) -> int | None:
 def clamp_byte(value: float) -> int:
     """Clamp a float to the range [0, 255] and round to nearest int."""
     return max(0, min(255, int(round(value))))
+
+
+# ---------------------------------------------------------------------------
+# Image list de-duplication (generate page)
+# ---------------------------------------------------------------------------
+
+# Extensions the generator actually processes; only these take part in the
+# same-name-same-extension rule. Other files keep their existing behaviour.
+IMAGE_NAME_DEDUP_SUFFIXES = {".jpg", ".jpeg", ".png"}
+
+
+def image_name_key(path: str | Path) -> Tuple[str, str] | None:
+    """Case-folded ``(stem, extension)`` naming key, or None outside the rule.
+
+    ``.PNG``/``.png`` and ``.JPG``/``.jpg`` compare equal, while a different
+    extension (``a.jpg`` vs ``a.png``) never collides. The folder is ignored.
+    """
+    path = Path(path)
+    suffix = path.suffix.lower()
+    if suffix not in IMAGE_NAME_DEDUP_SUFFIXES:
+        return None
+    return path.stem.casefold(), suffix
+
+
+def is_duplicate_image_name(path: str | Path, existing) -> bool:
+    """True when *path* shares name and extension with any of *existing*."""
+    key = image_name_key(path)
+    if key is None:
+        return False
+    return any(image_name_key(item) == key for item in existing)
+
+
+def drop_duplicate_image_names(paths):
+    """Keep the first of every same-named image; other files pass through."""
+    kept = []
+    seen = set()
+    for path in paths:
+        key = image_name_key(path)
+        if key is None or key not in seen:
+            kept.append(path)
+            if key is not None:
+                seen.add(key)
+    return kept
 
 
 # ---------------------------------------------------------------------------
