@@ -21,6 +21,7 @@ class TestDefaults:
         assert prefs["generator_gpu_device"] == ""
         assert prefs["generator_parallel_jobs"] == 1
         assert prefs["first_run_complete"] is False
+        assert prefs["ui_language"] == ""
 
     def test_unreadable_file_yields_defaults(self, prefs_file):
         prefs_file.parent.mkdir(parents=True)
@@ -62,3 +63,21 @@ class TestGeneratorParallelJobs:
     def test_unknown_keys_survive_a_save(self, prefs_file):
         save_ui_preferences({"generator_parallel_jobs": 2, "future_setting": "keep me"})
         assert load_ui_preferences()["future_setting"] == "keep me"
+
+
+class TestUiLanguage:
+    def test_roundtrip(self, prefs_file):
+        save_ui_preferences({"ui_language": "zh"})
+        assert load_ui_preferences()["ui_language"] == "zh"
+
+    def test_missing_yields_empty(self, prefs_file):
+        assert load_ui_preferences()["ui_language"] == ""
+
+    def test_unsupported_falls_back_to_empty(self, prefs_file):
+        prefs_file.parent.mkdir(parents=True)
+        prefs_file.write_text(json.dumps({"ui_language": "klingon"}), encoding="utf-8")
+        assert load_ui_preferences()["ui_language"] == ""
+
+    def test_empty_string_stays_empty(self, prefs_file):
+        save_ui_preferences({"ui_language": ""})
+        assert load_ui_preferences()["ui_language"] == ""

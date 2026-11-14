@@ -33,7 +33,7 @@ if str(ROOT) not in sys.path:
 from fh6_vinyl_resources import load_vinyl_polygons
 from game_profiles import PROFILES
 from geometry_json import RECTANGLE, ROTATED_ELLIPSE, load_normalized_geometry
-from generator_backend import GENERATOR_EXE, GENERATOR_JSON_SCAN_SECONDS, GENERATOR_POLL_SLEEP_SECONDS, GENERATOR_PREVIEW_SCAN_SECONDS, USER_SETTINGS_DIR, best_geometry_jsons, build_generator_command, build_generator_env, generated_jsons, generated_preview_files, generator_preview_path, load_settings, preprocess_input_image, write_custom_settings, write_user_settings_preset
+from generator_backend import GENERATOR_EXE, GENERATOR_JSON_SCAN_SECONDS, GENERATOR_POLL_SLEEP_SECONDS, GENERATOR_PREVIEW_SCAN_SECONDS, USER_SETTINGS_DIR, best_geometry_jsons, build_generator_command, build_generator_env, final_output_json, generated_jsons, generated_preview_files, generator_output_base, generator_preview_path, load_settings, prepare_generation_copies, preprocess_input_image, write_custom_settings, write_user_settings_preset
 from gpu_devices import device_env_overrides, find_device, find_device_by_label, list_gpu_devices
 from region_painter.state_manager import StateManager
 from region_painter.workflow import (
@@ -44,7 +44,7 @@ from region_painter.workflow import (
     prepare_region_pass,
     restore_checkpoint as region_restore_checkpoint,
 )
-from ui_preferences import load_ui_preferences, save_ui_preferences
+from ui_preferences import SUPPORTED_UI_LANGUAGES, load_ui_preferences, save_ui_preferences
 from version import APP_DISPLAY_NAME, __version__, app_title
 
 
@@ -53,6 +53,8 @@ from app_config import (
     PROBE_DIR,
     SESSION_PATH,
     FULL_SHAPE_ROOT,
+    GENERATED_IMAGE_DIR,
+    GENERATED_OUTPUT_DIR,
     MEMORY_SNAPSHOT_LIMIT_MB,
     PREVIEW_MAX,
     DETAILED_LOG_OUTPUT_LIMIT,
@@ -67,11 +69,12 @@ from app_config import (
     Theme,
 )
 
-from utils import load_cv2, load_pillow
+from utils import drop_duplicate_image_names, is_duplicate_image_name, load_cv2, load_pillow
 
 from i18n import tr
 
 from text.ui.compat import TextVinylThemeAdapter
+from text.ui.help_hint import _WHEEL_SEQUENCES, _scroll_amount_from_wheel_event
 from text.ui.workspace import TextVinylWorkspace
 
 LANGUAGES = { 
@@ -98,6 +101,7 @@ PREVIEW_CACHE_LIMIT = 24
 # fills the gaps; past ~4 the GPU saturates and VRAM becomes the limit.
 MAX_PARALLEL_GENERATIONS = 4
 LAYOUT_RESIZE_DEBOUNCE_MS = 180
+
 LAYOUT_SIZE_BUCKET = 64
 FH6_CIRCLE_BASE_SIZE = 63.0
 FH6_RECTANGLE_BASE_SIZE = 127.0
@@ -851,7 +855,9 @@ class App:
         self.root.geometry("1420x900")
         self.root.minsize(1180, 780)
         self.root.configure(bg=Theme.BG)
-        self.lang = "en"
+        self._ui_prefs = load_ui_preferences()
+        saved_lang = str(self._ui_prefs.get("ui_language") or "")
+        self.lang = saved_lang if saved_lang in SUPPORTED_UI_LANGUAGES else "en"
         self.queue = queue.Queue()
         self.shutdown_event = threading.Event()
         self.active_processes = set()
@@ -867,7 +873,9 @@ class App:
         self.eta_recycle_notice_active = False
         self.closed = False
         self.settings = load_settings()
-        self.images = [Path(path) for path in initial_images if Path(path).exists()]
+        self.images = drop_duplicate_image_names(
+            Path(path) for path in initial_images if Path(path).exists()
+        )
         self.json_files = []
         self.outputs = []
         self.processes = []
@@ -896,10 +904,10 @@ class App:
         self.progress_text = StringVar(value="")
         self.selected_profile = StringVar()
         self.selected_gpu = StringVar()
-        self.selected_gpu_key = str(load_ui_preferences().get("generator_gpu_device") or "")
+        self.selected_gpu_key = str(self._ui_prefs.get("generator_gpu_device") or "")
         self.gpu_devices = []
         self.gpu_scan_done = False
-        self.parallel_jobs = StringVar(value=str(load_ui_preferences().get("generator_parallel_jobs") or 1))
+        self.parallel_jobs = StringVar(value=str(self._ui_prefs.get("generator_parallel_jobs") or 1))
         self.outputs_lock = threading.Lock()
         self.selected_game = StringVar(value="fh6")
         self.selected_pid = StringVar()
@@ -968,7 +976,7 @@ class App:
             self.selected_profile.set(self.settings[min(2, len(self.settings) - 1)]["label"])
             self._update_setting_description()
         for image_path in list(self.images):
-            self._load_existing_checkpoints_for_image(image_path)
+            self._load_existing_output_json_for_image(image_path)
         self._render_lists()
         self.refresh_gpu_devices()
         self.log_line(tr(self.lang, "runtime_location").format(runtime=ROOT / "runtime", probe=PROBE_DIR.parent))
@@ -1296,7 +1304,7 @@ class App:
         self.update_indicator.pack(side=RIGHT, padx=(8, 0))
         self.update_indicator.bind("<Button-1>", self.show_update_status)
         self.lang_combo = ttk.Combobox(title_row, values=list(LANGUAGES.keys()), state="readonly", width=10)
-        self.lang_combo.set("English")
+        self.lang_combo.set(next((name for name, code in LANGUAGES.items() if code == self.lang), "English"))
         self.lang_combo.pack(side=RIGHT)
         self.lang_combo.bind("<<ComboboxSelected>>", self._on_language)
         self._label(title_row, "language").pack(side=RIGHT, padx=(0, 6))
@@ -1393,6 +1401,26 @@ class App:
         footer = Frame(parent)
         footer.grid(row=row + 1, column=0, sticky="ew")
         return inner, footer
+
+    def _attach_listbox_scrollbar(self, parent, listbox):
+        """Put a draggable vertical scrollbar beside *listbox* inside *parent*.
+
+        The wheel scrolls the list itself and stops there, so a page-level
+        ``bind_all`` wheel handler (Generate JSON page) no longer moves the
+        whole page while the pointer is over the list.
+        """
+
+        def _on_wheel(event):
+            listbox.yview_scroll(_scroll_amount_from_wheel_event(event), "units")
+            return "break"
+
+        scrollbar = ttk.Scrollbar(parent, orient="vertical", command=listbox.yview)
+        scrollbar.pack(side=RIGHT, fill="y")
+        listbox.configure(yscrollcommand=scrollbar.set)
+        for sequence in _WHEEL_SEQUENCES:
+            listbox.bind(sequence, _on_wheel)
+            scrollbar.bind(sequence, _on_wheel)
+        return scrollbar
 
     def _create_paned(self, parent, orient: str, layout_key: str, **pack_kwargs):
         paned = ttk.PanedWindow(parent, orient=orient)
@@ -1577,8 +1605,15 @@ class App:
         self._label(row, "images").pack(side=LEFT)
         self._button(row, "add_images", self.add_images).pack(side=RIGHT)
         self._button(row, "remove_image", self.remove_selected_image).pack(side=RIGHT, padx=8)
-        self.image_list = Listbox(step1, height=3)
-        self.image_list.pack(fill=X, padx=10, pady=(2, 8))
+        image_list_shell = Frame(step1)
+        image_list_shell.pack(fill=X, padx=10, pady=(2, 8))
+        self.image_list = Listbox(image_list_shell, height=3)
+        self.image_list.pack(side=LEFT, fill=X, expand=True)
+        self._attach_listbox_scrollbar(image_list_shell, self.image_list)
+        # The page canvas claims the wheel via bind_all while the pointer is
+        # inside scroll_area; suspend it over the list so only the list moves.
+        image_list_shell.bind("<Enter>", lambda _event: _unbind_mousewheel())
+        image_list_shell.bind("<Leave>", lambda _event: _bind_mousewheel())
         self.image_list.bind("<<ListboxSelect>>", self._preview_selected_image)
 
         step2 = ttk.LabelFrame(left, text=tr(self.lang, "generate_step_quality"))
@@ -3288,8 +3323,11 @@ class App:
         self._button(row, "add_json", self.add_json).pack(side=RIGHT)
         self._button(row, "remove_json", self.remove_selected_json).pack(side=RIGHT, padx=(8, 0))
         self._button(row, "use_outputs", self.use_generated_outputs).pack(side=RIGHT, padx=8)
-        self.json_list = Listbox(step3, height=10)
-        self.json_list.pack(fill=BOTH, expand=True, padx=10, pady=6)
+        json_list_shell = Frame(step3)
+        json_list_shell.pack(fill=BOTH, expand=True, padx=10, pady=6)
+        self.json_list = Listbox(json_list_shell, height=10)
+        self.json_list.pack(side=LEFT, fill=BOTH, expand=True)
+        self._attach_listbox_scrollbar(json_list_shell, self.json_list)
         self.json_list.bind("<<ListboxSelect>>", self._preview_selected_json)
 
         step4 = ttk.LabelFrame(right, text=tr(self.lang, "step_import"))
@@ -3407,6 +3445,10 @@ class App:
 
     def _on_language(self, _event=None):
         self.lang = LANGUAGES.get(self.lang_combo.get(), "en")
+        prefs = load_ui_preferences()
+        if prefs.get("ui_language") != self.lang:
+            prefs["ui_language"] = self.lang
+            save_ui_preferences(prefs)
         for widget, key, option in self.translated:
             try:
                 widget.config(**{option: tr(self.lang, key)})
@@ -3630,32 +3672,40 @@ class App:
                 added += 1
         return added
 
-    def _load_existing_checkpoints_for_image(self, image_path, log_to_queue=False):
-        existing = best_geometry_jsons(generated_jsons(image_path))
-        if not existing:
+    def _load_existing_output_json_for_image(self, image_path, log_to_queue=False):
+        """Auto-import only the image's finished final JSON, never checkpoints."""
+        final = final_output_json(image_path)
+        if final is None:
             return 0
-        added = self._add_json_paths(existing[:1])
+        added = self._add_json_paths([final])
         if added:
-            message = tr(self.lang, "existing_checkpoints_found").format(image=Path(image_path).name, count=len(existing))
+            message = tr(self.lang, "existing_final_json_found").format(image=Path(image_path).name)
             if log_to_queue:
                 self.queue.put(("log", message))
             else:
                 self.log_line(message)
         return added
 
-    def _queue_generated_outputs(self, image_path, before):
-        after = generated_jsons(image_path)
-        new_outputs = best_geometry_jsons([path for path in after if path.resolve() not in before])
-        if not new_outputs and after:
-            new_outputs = best_geometry_jsons(after[:1])
+    def _queue_final_generation_output(self, final_json, before_stat, prefix=""):
+        """Queue the run's final JSON when this run created or updated it.
+
+        A final JSON that already existed before the run only counts when its
+        timestamp or size changed, so a leftover file from an earlier run is
+        never reported as this run's output. Returns the queued paths.
+        """
+        try:
+            stat = final_json.stat()
+        except OSError:
+            return []
+        if before_stat is not None and (stat.st_mtime_ns, stat.st_size) == before_stat:
+            return []
         with self.outputs_lock:
-            for output in new_outputs:
-                if output not in self.outputs:
-                    self.outputs.append(output)
-                if output not in self.json_files:
-                    self.json_files.append(output)
-                self.queue.put(("log", f"Generated: {output}"))
-        return new_outputs
+            if final_json not in self.outputs:
+                self.outputs.append(final_json)
+            if final_json not in self.json_files:
+                self.json_files.append(final_json)
+            self.queue.put(("log", f"{prefix}Generated: {final_json}"))
+        return [final_json]
 
     def log_line(self, message):
         timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
@@ -4126,19 +4176,34 @@ class App:
             filetypes=[("Images", "*.png *.jpg *.jpeg *.bmp"), ("All files", "*.*")],
         )
         added_paths = []
+        rejected_paths = []
         for item in files:
             path = Path(item)
-            if path.exists() and path not in self.images:
-                self.images.append(path)
-                added_paths.append(path)
-                self._load_existing_checkpoints_for_image(path)
+            if not path.exists() or path in self.images:
+                continue
+            if is_duplicate_image_name(path, self.images):
+                rejected_paths.append(path)
+                continue
+            self.images.append(path)
+            added_paths.append(path)
+            self._load_existing_output_json_for_image(path)
         self._render_lists()
+        if rejected_paths:
+            self._warn_duplicate_images(rejected_paths)
         if files:
             self.show_source_preview(Path(files[0]))
         if added_paths:
-            existing_added = sum(1 for path in added_paths if generated_jsons(path))
+            existing_added = sum(1 for path in added_paths if final_output_json(path) is not None)
             if existing_added:
                 self.log_line(tr(self.lang, "cannot_resume_checkpoint"))
+
+    def _warn_duplicate_images(self, rejected_paths):
+        names = ", ".join(dict.fromkeys(path.name for path in rejected_paths))
+        message = tr(self.lang, "duplicate_image_rejected").format(names=names)
+        try:
+            messagebox.showwarning(tr(self.lang, "duplicate_image_name"), message)
+        except Exception:
+            self.log_line(message)
 
     def remove_selected_image(self):
         selection = list(self.image_list.curselection())
@@ -4590,12 +4655,42 @@ class App:
             return "failed"
         return "done"
 
+    def _prepare_generation_paths(self, image_path):
+        """Archive the source under image/<ext>/ and return the generator input.
+
+        The generator reads the archived copy, so out/<stem>/<ext>/ collects
+        all JSON of one image while out/ never holds image files. Falls back
+        to the original path when the archive cannot be written; an archived
+        duplicate with different content raises ValueError.
+        """
+        source = Path(image_path)
+        try:
+            backup, output_folder = prepare_generation_copies(
+                source, GENERATED_IMAGE_DIR, GENERATED_OUTPUT_DIR
+            )
+        except OSError as exc:
+            self.queue.put(("log", tr(self.lang, "generate_backup_failed").format(error=exc)))
+            return source
+        if backup.resolve() != source.resolve():
+            self.queue.put(("log", tr(self.lang, "generate_backup_saved").format(path=backup)))
+        self.queue.put(("log", tr(self.lang, "generate_output_folder").format(path=output_folder)))
+        return backup
+
     def _run_one_generation(self, image_path, setting, generator_env, prefix="", track_eta=True):
         """Generate one image. Returns "done", "failed" or "stopped"."""
-        input_image = preprocess_input_image(image_path, setting)
-        if input_image != image_path:
+        source_image = Path(image_path)
+        working_image = self._prepare_generation_paths(source_image)
+        input_image = preprocess_input_image(working_image, setting)
+        if input_image != working_image:
             self.queue.put(("log", f"{prefix}Preprocessed image: {input_image}"))
-        before = {path.resolve() for path in generated_jsons(input_image)}
+        # The generator derives every output from this -output base, so the
+        # run's own final JSON is exactly "<base>.json" in the new layout.
+        final_json = Path(f"{generator_output_base(input_image)}.json")
+        try:
+            final_stat = final_json.stat()
+            final_before = (final_stat.st_mtime_ns, final_stat.st_size)
+        except OSError:
+            final_before = None
         preview_path = generator_preview_path(input_image)
         if preview_path.exists():
             try:
@@ -4663,11 +4758,9 @@ class App:
             while proc.poll() is None:
                 if self.shutdown_event.is_set():
                     self._terminate_process(proc)
-                    outputs = self._queue_generated_outputs(input_image, before)
-                    for output in outputs:
-                        self.queue.put(("log", tr(self.lang, "checkpoint_available_after_failure").format(path=output)))
-                    if outputs:
-                        self.queue.put(("render_lists", None))
+                    # No auto-import on a stopped run: any checkpoint stays on
+                    # disk for a manual "Add JSON".
+                    self.queue.put(("log", tr(self.lang, "checkpoint_manual_hint")))
                     return "stopped"
                 _drain_generator_output()
                 now = time.monotonic()
@@ -4695,15 +4788,13 @@ class App:
             self._unregister_generator_proc(proc)
         if proc.returncode != 0:
             self._record_detail(f"GENERATOR EXIT: {proc.returncode}")
-            outputs = self._queue_generated_outputs(input_image, before)
-            for output in outputs:
-                self.queue.put(("log", tr(self.lang, "checkpoint_available_after_failure").format(path=output)))
-            if outputs:
-                self.queue.put(("render_lists", None))
+            # No auto-import on a failed run: any checkpoint stays on disk
+            # for a manual "Add JSON".
+            self.queue.put(("log", tr(self.lang, "checkpoint_manual_hint")))
             self.queue.put(("log", f"{prefix}{self._generator_exit_message(proc.returncode)}"))
             return "failed"
         self._record_detail("GENERATOR EXIT: 0")
-        new_outputs = self._queue_generated_outputs(input_image, before)
+        new_outputs = self._queue_final_generation_output(final_json, final_before, prefix=prefix)
         if not new_outputs:
             self.queue.put(("log", f"{prefix}Generator finished but no JSON output was found."))
             return "failed"
@@ -4719,6 +4810,8 @@ class App:
         folder = None
         if self.outputs:
             folder = self.outputs[-1].parent
+        elif GENERATED_OUTPUT_DIR.exists():
+            folder = GENERATED_OUTPUT_DIR
         elif self.images:
             folder = self.images[-1].parent
         if folder and folder.exists():

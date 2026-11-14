@@ -152,6 +152,20 @@ EXE 旁边可能出现这些外部文件夹：
 - **导入效果发糊：** 使用更高层数的 JSON，或提高 `Output layers` / `Random samples`。
 - **需要排查问题：** 在软件里点击 `Export detailed log`，把导出的日志附到 issue。
 
+## 从源码构建
+
+需要 Python 和 PyInstaller。
+
+1. 安装 64 位 Python 3.10–3.13（Windows 版）。
+2. 运行 `install_dependencies.bat`（或 `scripts\ensure_venv.bat`），脚本会创建项目 `.venv` 并安装 `requirements.txt` 及可选的预览依赖。
+3. 可选：运行测试：`.venv\Scripts\python.exe -m pytest`。
+4. 用 PowerShell 构建：`powershell -ExecutionPolicy Bypass -File scripts\make_exe_release.ps1`。
+5. 脚本输出 `dist\forza-painter-fh6-v<版本号>.exe` 和对应的 `-onefile.zip` 压缩包，版本号取自 `src\version.py`。
+
+构建脚本已自动处理 Windows venv 的 Tcl/Tk 问题：它会把 `TCL_LIBRARY`/`TK_LIBRARY` 指向 Python 安装目录，并在调用 PyInstaller 前验证 `tkinter` 能启动，因此有问题的构建会直接报错，而不是产出一个缺 tkinter 的 EXE。
+
+注意：不要在「受保护」的文件夹里运行或解压构建出的 EXE。若出现 `Could not create temporary directory!`，以管理员身份启动，或在其它盘根目录新建一个文件夹存放构建文件。
+
 ## 资源链接
 
 - 导入参考视频：https://www.bilibili.com/video/BV1hG5Z6nENZ
