@@ -33,7 +33,7 @@ if str(ROOT) not in sys.path:
 from fh6_vinyl_resources import load_vinyl_polygons
 from game_profiles import PROFILES
 from geometry_json import RECTANGLE, ROTATED_ELLIPSE, load_normalized_geometry
-from generator_backend import GENERATOR_EXE, GENERATOR_JSON_SCAN_SECONDS, GENERATOR_POLL_SLEEP_SECONDS, GENERATOR_PREVIEW_SCAN_SECONDS, USER_SETTINGS_DIR, best_geometry_jsons, build_generator_command, build_generator_env, generated_jsons, generated_preview_files, generator_preview_path, load_settings, prepare_generation_copies, preprocess_input_image, write_custom_settings, write_user_settings_preset
+from generator_backend import GENERATOR_EXE, GENERATOR_JSON_SCAN_SECONDS, GENERATOR_POLL_SLEEP_SECONDS, GENERATOR_PREVIEW_SCAN_SECONDS, USER_SETTINGS_DIR, best_geometry_jsons, build_generator_command, build_generator_env, final_output_json, generated_jsons, generated_preview_files, generator_output_base, generator_preview_path, load_settings, prepare_generation_copies, preprocess_input_image, write_custom_settings, write_user_settings_preset
 from gpu_devices import device_env_overrides, find_device, find_device_by_label, list_gpu_devices
 from region_painter.state_manager import StateManager
 from region_painter.workflow import (
@@ -74,6 +74,7 @@ from utils import drop_duplicate_image_names, is_duplicate_image_name, load_cv2,
 from i18n import tr
 
 from text.ui.compat import TextVinylThemeAdapter
+from text.ui.help_hint import _WHEEL_SEQUENCES, _scroll_amount_from_wheel_event
 from text.ui.workspace import TextVinylWorkspace
 
 LANGUAGES = { 
@@ -101,37 +102,6 @@ PREVIEW_CACHE_LIMIT = 24
 MAX_PARALLEL_GENERATIONS = 4
 LAYOUT_RESIZE_DEBOUNCE_MS = 180
 
-
-def enable_windows_dpi_awareness():
-    """Opt the process into Windows DPI awareness so fonts stay crisp.
-
-    A DPI-unaware process is bitmap-stretched by Windows on any display
-    scale above 100% (125%, 150%, ...), which blurs every font and makes
-    resizing look fuzzy. Every font in this app is declared in points, so
-    once the process reports real DPI, Tk rescales them automatically.
-    Must run before the Tk root window is created.
-    """
-    if sys.platform != "win32":
-        return
-    import ctypes
-
-    try:
-        # Per-monitor v2 (Windows 10 1703+): crisp on every monitor and
-        # re-sharpens when the window is dragged between displays with
-        # different scale factors. DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4.
-        if ctypes.windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4)):
-            return
-    except Exception:
-        pass
-    try:
-        # Per-monitor v1 (Windows 8.1+).
-        ctypes.windll.shcore.SetProcessDpiAwareness(2)
-    except Exception:
-        try:
-            # System-aware fallback (Windows Vista+).
-            ctypes.windll.user32.SetProcessDPIAware()
-        except Exception:
-            pass
 LAYOUT_SIZE_BUCKET = 64
 FH6_CIRCLE_BASE_SIZE = 63.0
 FH6_RECTANGLE_BASE_SIZE = 127.0
@@ -881,15 +851,9 @@ class App:
     def __init__(self, initial_images):
         ensure_dirs()
         self.root = Tk()
-        # Window geometry is in pixels, so scale it by the monitor DPI to
-        # keep the same physical size now that the process is DPI aware.
-        try:
-            dpi_scale = max(1.0, self.root.winfo_fpixels("1i") / 96.0)
-        except Exception:
-            dpi_scale = 1.0
         self.root.title(app_title())
-        self.root.geometry(f"{int(1420 * dpi_scale)}x{int(900 * dpi_scale)}")
-        self.root.minsize(int(1180 * dpi_scale), int(780 * dpi_scale))
+        self.root.geometry("1420x900")
+        self.root.minsize(1180, 780)
         self.root.configure(bg=Theme.BG)
         self._ui_prefs = load_ui_preferences()
         saved_lang = str(self._ui_prefs.get("ui_language") or "")
@@ -1012,7 +976,7 @@ class App:
             self.selected_profile.set(self.settings[min(2, len(self.settings) - 1)]["label"])
             self._update_setting_description()
         for image_path in list(self.images):
-            self._load_existing_checkpoints_for_image(image_path)
+            self._load_existing_output_json_for_image(image_path)
         self._render_lists()
         self.refresh_gpu_devices()
         self.log_line(tr(self.lang, "runtime_location").format(runtime=ROOT / "runtime", probe=PROBE_DIR.parent))
@@ -1438,6 +1402,26 @@ class App:
         footer.grid(row=row + 1, column=0, sticky="ew")
         return inner, footer
 
+    def _attach_listbox_scrollbar(self, parent, listbox):
+        """Put a draggable vertical scrollbar beside *listbox* inside *parent*.
+
+        The wheel scrolls the list itself and stops there, so a page-level
+        ``bind_all`` wheel handler (Generate JSON page) no longer moves the
+        whole page while the pointer is over the list.
+        """
+
+        def _on_wheel(event):
+            listbox.yview_scroll(_scroll_amount_from_wheel_event(event), "units")
+            return "break"
+
+        scrollbar = ttk.Scrollbar(parent, orient="vertical", command=listbox.yview)
+        scrollbar.pack(side=RIGHT, fill="y")
+        listbox.configure(yscrollcommand=scrollbar.set)
+        for sequence in _WHEEL_SEQUENCES:
+            listbox.bind(sequence, _on_wheel)
+            scrollbar.bind(sequence, _on_wheel)
+        return scrollbar
+
     def _create_paned(self, parent, orient: str, layout_key: str, **pack_kwargs):
         paned = ttk.PanedWindow(parent, orient=orient)
         pack_kwargs.setdefault("fill", BOTH)
@@ -1621,8 +1605,15 @@ class App:
         self._label(row, "images").pack(side=LEFT)
         self._button(row, "add_images", self.add_images).pack(side=RIGHT)
         self._button(row, "remove_image", self.remove_selected_image).pack(side=RIGHT, padx=8)
-        self.image_list = Listbox(step1, height=3)
-        self.image_list.pack(fill=X, padx=10, pady=(2, 8))
+        image_list_shell = Frame(step1)
+        image_list_shell.pack(fill=X, padx=10, pady=(2, 8))
+        self.image_list = Listbox(image_list_shell, height=3)
+        self.image_list.pack(side=LEFT, fill=X, expand=True)
+        self._attach_listbox_scrollbar(image_list_shell, self.image_list)
+        # The page canvas claims the wheel via bind_all while the pointer is
+        # inside scroll_area; suspend it over the list so only the list moves.
+        image_list_shell.bind("<Enter>", lambda _event: _unbind_mousewheel())
+        image_list_shell.bind("<Leave>", lambda _event: _bind_mousewheel())
         self.image_list.bind("<<ListboxSelect>>", self._preview_selected_image)
 
         step2 = ttk.LabelFrame(left, text=tr(self.lang, "generate_step_quality"))
@@ -3332,8 +3323,11 @@ class App:
         self._button(row, "add_json", self.add_json).pack(side=RIGHT)
         self._button(row, "remove_json", self.remove_selected_json).pack(side=RIGHT, padx=(8, 0))
         self._button(row, "use_outputs", self.use_generated_outputs).pack(side=RIGHT, padx=8)
-        self.json_list = Listbox(step3, height=10)
-        self.json_list.pack(fill=BOTH, expand=True, padx=10, pady=6)
+        json_list_shell = Frame(step3)
+        json_list_shell.pack(fill=BOTH, expand=True, padx=10, pady=6)
+        self.json_list = Listbox(json_list_shell, height=10)
+        self.json_list.pack(side=LEFT, fill=BOTH, expand=True)
+        self._attach_listbox_scrollbar(json_list_shell, self.json_list)
         self.json_list.bind("<<ListboxSelect>>", self._preview_selected_json)
 
         step4 = ttk.LabelFrame(right, text=tr(self.lang, "step_import"))
@@ -3678,36 +3672,40 @@ class App:
                 added += 1
         return added
 
-    def _existing_output_jsons(self, image_path):
-        """JSONs already generated for an image, new layout plus legacy locations."""
-        return list(generated_jsons(Path(image_path)))
-
-    def _load_existing_checkpoints_for_image(self, image_path, log_to_queue=False):
-        existing = best_geometry_jsons(self._existing_output_jsons(image_path))
-        if not existing:
+    def _load_existing_output_json_for_image(self, image_path, log_to_queue=False):
+        """Auto-import only the image's finished final JSON, never checkpoints."""
+        final = final_output_json(image_path)
+        if final is None:
             return 0
-        added = self._add_json_paths(existing[:1])
+        added = self._add_json_paths([final])
         if added:
-            message = tr(self.lang, "existing_checkpoints_found").format(image=Path(image_path).name, count=len(existing))
+            message = tr(self.lang, "existing_final_json_found").format(image=Path(image_path).name)
             if log_to_queue:
                 self.queue.put(("log", message))
             else:
                 self.log_line(message)
         return added
 
-    def _queue_generated_outputs(self, image_path, before):
-        after = generated_jsons(image_path)
-        new_outputs = best_geometry_jsons([path for path in after if path.resolve() not in before])
-        if not new_outputs and after:
-            new_outputs = best_geometry_jsons(after[:1])
+    def _queue_final_generation_output(self, final_json, before_stat, prefix=""):
+        """Queue the run's final JSON when this run created or updated it.
+
+        A final JSON that already existed before the run only counts when its
+        timestamp or size changed, so a leftover file from an earlier run is
+        never reported as this run's output. Returns the queued paths.
+        """
+        try:
+            stat = final_json.stat()
+        except OSError:
+            return []
+        if before_stat is not None and (stat.st_mtime_ns, stat.st_size) == before_stat:
+            return []
         with self.outputs_lock:
-            for output in new_outputs:
-                if output not in self.outputs:
-                    self.outputs.append(output)
-                if output not in self.json_files:
-                    self.json_files.append(output)
-                self.queue.put(("log", f"Generated: {output}"))
-        return new_outputs
+            if final_json not in self.outputs:
+                self.outputs.append(final_json)
+            if final_json not in self.json_files:
+                self.json_files.append(final_json)
+            self.queue.put(("log", f"{prefix}Generated: {final_json}"))
+        return [final_json]
 
     def log_line(self, message):
         timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
@@ -4188,14 +4186,14 @@ class App:
                 continue
             self.images.append(path)
             added_paths.append(path)
-            self._load_existing_checkpoints_for_image(path)
+            self._load_existing_output_json_for_image(path)
         self._render_lists()
         if rejected_paths:
             self._warn_duplicate_images(rejected_paths)
         if files:
             self.show_source_preview(Path(files[0]))
         if added_paths:
-            existing_added = sum(1 for path in added_paths if self._existing_output_jsons(path))
+            existing_added = sum(1 for path in added_paths if final_output_json(path) is not None)
             if existing_added:
                 self.log_line(tr(self.lang, "cannot_resume_checkpoint"))
 
@@ -4685,7 +4683,14 @@ class App:
         input_image = preprocess_input_image(working_image, setting)
         if input_image != working_image:
             self.queue.put(("log", f"{prefix}Preprocessed image: {input_image}"))
-        before = {path.resolve() for path in generated_jsons(input_image)}
+        # The generator derives every output from this -output base, so the
+        # run's own final JSON is exactly "<base>.json" in the new layout.
+        final_json = Path(f"{generator_output_base(input_image)}.json")
+        try:
+            final_stat = final_json.stat()
+            final_before = (final_stat.st_mtime_ns, final_stat.st_size)
+        except OSError:
+            final_before = None
         preview_path = generator_preview_path(input_image)
         if preview_path.exists():
             try:
@@ -4753,11 +4758,9 @@ class App:
             while proc.poll() is None:
                 if self.shutdown_event.is_set():
                     self._terminate_process(proc)
-                    outputs = self._queue_generated_outputs(input_image, before)
-                    for output in outputs:
-                        self.queue.put(("log", tr(self.lang, "checkpoint_available_after_failure").format(path=output)))
-                    if outputs:
-                        self.queue.put(("render_lists", None))
+                    # No auto-import on a stopped run: any checkpoint stays on
+                    # disk for a manual "Add JSON".
+                    self.queue.put(("log", tr(self.lang, "checkpoint_manual_hint")))
                     return "stopped"
                 _drain_generator_output()
                 now = time.monotonic()
@@ -4785,15 +4788,13 @@ class App:
             self._unregister_generator_proc(proc)
         if proc.returncode != 0:
             self._record_detail(f"GENERATOR EXIT: {proc.returncode}")
-            outputs = self._queue_generated_outputs(input_image, before)
-            for output in outputs:
-                self.queue.put(("log", tr(self.lang, "checkpoint_available_after_failure").format(path=output)))
-            if outputs:
-                self.queue.put(("render_lists", None))
+            # No auto-import on a failed run: any checkpoint stays on disk
+            # for a manual "Add JSON".
+            self.queue.put(("log", tr(self.lang, "checkpoint_manual_hint")))
             self.queue.put(("log", f"{prefix}{self._generator_exit_message(proc.returncode)}"))
             return "failed"
         self._record_detail("GENERATOR EXIT: 0")
-        new_outputs = self._queue_generated_outputs(input_image, before)
+        new_outputs = self._queue_final_generation_output(final_json, final_before, prefix=prefix)
         if not new_outputs:
             self.queue.put(("log", f"{prefix}Generator finished but no JSON output was found."))
             return "failed"
@@ -5730,7 +5731,6 @@ def main():
     parser.add_argument("--version", action="version", version=f"{APP_DISPLAY_NAME} {__version__}")
     parser.add_argument("images", nargs="*", help="Optional image files to preload.")
     args = parser.parse_args()
-    enable_windows_dpi_awareness()
     App(args.images).run()
 
 

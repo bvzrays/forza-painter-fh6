@@ -7,6 +7,7 @@ import threading
 import pytest
 
 from generator_backend import (
+    final_output_json,
     generated_jsons,
     generator_output_base,
     prepare_generation_copies,
@@ -208,3 +209,123 @@ class TestConcurrentCopyAllocation:
         assert backup.read_bytes() == b"same-bytes"
         assert len(list((image_dir / "png").iterdir())) == 1
         assert not list(output_dir.rglob("*.png"))
+
+
+class TestExactJsonOwnership:
+    def test_sibling_stem_images_never_share_jsons(self, dirs, tmp_path):
+        image_dir, output_dir = dirs
+        source = _write_image(tmp_path / "sources" / "mabynotimage.png")
+        backup, folder = prepare_generation_copies(source, image_dir, output_dir)
+        (folder / "mabynotimage.json").write_text("{}", encoding="utf-8")
+
+        sibling = _write_image(tmp_path / "sources" / "mabynotimage-2.png")
+        sibling_backup, sibling_folder = prepare_generation_copies(sibling, image_dir, output_dir)
+        (sibling_folder / "mabynotimage-2.json").write_text("{}", encoding="utf-8")
+        (sibling_folder / "mabynotimage-2.500.json").write_text("{}", encoding="utf-8")
+
+        found = {path.name for path in generated_jsons(backup, output_dir)}
+        sibling_found = {path.name for path in generated_jsons(sibling_backup, output_dir)}
+        assert found == {"mabynotimage.json"}
+        assert sibling_found == {"mabynotimage-2.json", "mabynotimage-2.500.json"}
+
+    def test_checkpoint_is_found_for_polling_but_never_as_final(self, dirs, tmp_path):
+        image_dir, output_dir = dirs
+        source = _write_image(tmp_path / "sources" / "mabynotimage.png")
+        backup, folder = prepare_generation_copies(source, image_dir, output_dir)
+        checkpoint = folder / "mabynotimage.500.json"
+        checkpoint.write_text("{}", encoding="utf-8")
+
+        assert [path.name for path in generated_jsons(backup, output_dir)] == ["mabynotimage.500.json"]
+        assert final_output_json(backup, output_dir) is None
+
+        (folder / "mabynotimage.json").write_text("{}", encoding="utf-8")
+        assert final_output_json(backup, output_dir) == folder / "mabynotimage.json"
+
+    def test_non_numbered_siblings_are_rejected(self, dirs, tmp_path):
+        image_dir, output_dir = dirs
+        source = _write_image(tmp_path / "sources" / "mabynotimage.png")
+        backup, folder = prepare_generation_copies(source, image_dir, output_dir)
+        for name in (
+            "mabynotimage-2.json",
+            "mabynotimage-backup.json",
+            "mabynotimage.500.600.json",
+            "mabynotimagecopy.json",
+        ):
+            (folder / name).write_text("{}", encoding="utf-8")
+
+        assert generated_jsons(backup, output_dir) == []
+        assert final_output_json(backup, output_dir) is None
+
+    def test_legacy_locations_are_read_with_exact_names_only(self, dirs, tmp_path):
+        image_dir, output_dir = dirs
+        source = _write_image(tmp_path / "sources" / "mabynotimage.png")
+        backup, _folder = prepare_generation_copies(source, image_dir, output_dir)
+
+        legacy_root = output_dir / "mabynotimage" / "mabynotimage.json"
+        legacy_root.write_text("{}", encoding="utf-8")
+        (output_dir / "mabynotimage" / "mabynotimage-2.json").write_text("{}", encoding="utf-8")
+        (output_dir / "mabynotimage" / "mabynotimage.500.json").write_text("{}", encoding="utf-8")
+
+        assert final_output_json(backup, output_dir) == legacy_root
+        assert {path.name for path in generated_jsons(backup, output_dir)} == {
+            "mabynotimage.json",
+            "mabynotimage.500.json",
+        }
+
+    def test_final_locator_prefers_the_current_extension_folder(self, dirs, tmp_path):
+        image_dir, output_dir = dirs
+        source = _write_image(tmp_path / "sources" / "mabynotimage.png")
+        backup, folder = prepare_generation_copies(source, image_dir, output_dir)
+        legacy_root = output_dir / "mabynotimage" / "mabynotimage.json"
+        legacy_root.write_text("{}", encoding="utf-8")
+        current = folder / "mabynotimage.json"
+        current.write_text("{}", encoding="utf-8")
+
+        assert final_output_json(backup, output_dir) == current
+
+    def test_final_locator_falls_back_beside_the_original(self, dirs, tmp_path):
+        image_dir, output_dir = dirs
+        source = _write_image(tmp_path / "sources" / "mabynotimage.png")
+        backup, _folder = prepare_generation_copies(source, image_dir, output_dir)
+
+        beside = tmp_path / "sources" / "mabynotimage.json"
+        beside.write_text("{}", encoding="utf-8")
+        (tmp_path / "sources" / "mabynotimage-2.json").write_text("{}", encoding="utf-8")
+
+        assert final_output_json(source, output_dir) == beside
+        assert {path.name for path in generated_jsons(source, output_dir)} == {"mabynotimage.json"}
+        assert generated_jsons(backup, output_dir) == []
+
+    def test_final_locator_reads_the_legacy_beside_folder(self, dirs, tmp_path):
+        image_dir, output_dir = dirs
+        source = _write_image(tmp_path / "sources" / "mabynotimage.png")
+        backup, _folder = prepare_generation_copies(source, image_dir, output_dir)
+        legacy_folder = tmp_path / "sources" / "mabynotimage"
+        (legacy_folder / "nested").mkdir(parents=True)
+        legacy_final = legacy_folder / "nested" / "mabynotimage.json"
+        legacy_final.write_text("{}", encoding="utf-8")
+        (legacy_folder / "mabynotimage.500.json").write_text("{}", encoding="utf-8")
+
+        assert final_output_json(source, output_dir) == legacy_final
+        assert {path.name for path in generated_jsons(source, output_dir)} == {
+            "mabynotimage.json",
+            "mabynotimage.500.json",
+        }
+        assert generated_jsons(backup, output_dir) == []
+
+    def test_dotted_stem_keeps_its_full_name(self, dirs, tmp_path):
+        image_dir, output_dir = dirs
+        source = _write_image(tmp_path / "sources" / "mabynotimage.v2.png")
+        backup, folder = prepare_generation_copies(source, image_dir, output_dir)
+
+        assert generator_output_base(backup, output_dir) == (
+            output_dir / "mabynotimage.v2" / "png" / "mabynotimage.v2"
+        )
+        final = folder / "mabynotimage.v2.json"
+        final.write_text("{}", encoding="utf-8")
+        (folder / "mabynotimage.json").write_text("{}", encoding="utf-8")
+
+        assert final_output_json(backup, output_dir) == final
+        assert {path.name for path in generated_jsons(backup, output_dir)} == {
+            "mabynotimage.v2.json",
+        }

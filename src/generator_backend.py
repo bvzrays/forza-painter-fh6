@@ -404,6 +404,22 @@ def generator_output_base(
 # Output discovery
 # ---------------------------------------------------------------------------
 
+def _json_belongs_to_image(path: Path, stem: str) -> bool:
+    """True when *path* is a JSON of the image named *stem*.
+
+    Only the exact final name ``<stem>.json`` and numbered checkpoints
+    ``<stem>.<number>.json`` count. Sibling images such as ``logo-2.json``
+    and renamed files like ``logo-backup.json`` belong to something else
+    and are never picked up.
+    """
+    name_stem = path.stem
+    if name_stem == stem:
+        return True
+    if name_stem.startswith(f"{stem}."):
+        return name_stem[len(stem) + 1:].isdigit()
+    return False
+
+
 def generated_jsons(
     image_path: str | Path, output_dir: str | Path = GENERATED_OUTPUT_DIR
 ) -> list[Path]:
@@ -412,7 +428,11 @@ def generated_jsons(
     Current layout: ``<output_dir>/<stem>/<ext>/`` holds exactly this image's
     JSONs. Legacy reads kept for older runs: the shared ``<output_dir>/<stem>/``
     root, the ``<stem>/`` folder beside the image, and JSONs sitting next to
-    the image itself. Sibling extension folders are never scanned.
+    the image itself. A file counts only when its name is exactly
+    ``<stem>.json`` or a numbered checkpoint ``<stem>.<number>.json`` — e.g.
+    ``logo-2.json`` never belongs to ``logo`` — and sibling extension folders
+    are never scanned. Numbered checkpoints stay in the result for the
+    generation-time polling; default selection uses final_output_json().
     """
     image_path = Path(image_path)
     stem, ext = image_identity(image_path)
@@ -420,12 +440,52 @@ def generated_jsons(
     candidates: list[Path] = []
     for folder in (output_dir / stem / ext, output_dir / stem):
         if folder.is_dir():
-            candidates.extend(folder.glob("*.json"))
+            candidates.extend(
+                path for path in folder.glob("*.json") if _json_belongs_to_image(path, stem)
+            )
     beside_folder = image_path.parent / stem
     if beside_folder.is_dir():
-        candidates.extend(beside_folder.rglob("*.json"))
-    candidates.extend(image_path.parent.glob(f"{stem}*.json"))
+        candidates.extend(
+            path for path in beside_folder.rglob("*.json") if _json_belongs_to_image(path, stem)
+        )
+    candidates.extend(
+        path for path in image_path.parent.glob("*.json") if _json_belongs_to_image(path, stem)
+    )
     return sorted(set(candidates), key=lambda p: p.stat().st_mtime, reverse=True)
+
+
+def final_output_json(
+    image_path: str | Path, output_dir: str | Path = GENERATED_OUTPUT_DIR
+) -> Path | None:
+    """Locate the finished (non-checkpoint) JSON of one image.
+
+    Search order: the current ``<output_dir>/<stem>/<ext>/<stem>.json``, the
+    legacy ``<output_dir>/<stem>/<stem>.json`` root, the JSON beside the
+    original image, and the legacy ``<stem>/`` folder beside the image. Only
+    an existing exact final path is returned — checkpoints such as
+    ``<stem>.500.json`` never qualify, and ``None`` means nothing was found.
+    The legacy shared ``out/<stem>/`` root cannot tell which extension the
+    original image had, so the current extension folder always wins.
+    """
+    image_path = Path(image_path)
+    stem, ext = image_identity(image_path)
+    final_name = f"{stem}.json"
+    output_dir = Path(output_dir)
+    for candidate in (
+        output_dir / stem / ext / final_name,
+        output_dir / stem / final_name,
+        image_path.parent / final_name,
+    ):
+        if candidate.is_file():
+            return candidate
+    beside_folder = image_path.parent / stem
+    if beside_folder.is_dir():
+        matches = sorted(
+            path for path in beside_folder.rglob("*.json") if path.name == final_name
+        )
+        if matches:
+            return matches[0]
+    return None
 
 
 def geometry_shape_count(path: str | Path) -> int:
