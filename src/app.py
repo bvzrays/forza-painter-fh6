@@ -4685,13 +4685,13 @@ class App:
             self.queue.put(("log", f"{prefix}Preprocessed image: {input_image}"))
         # The generator derives every output from this -output base, so the
         # run's own final JSON is exactly "<base>.json" in the new layout.
-        final_json = Path(f"{generator_output_base(input_image)}.json")
+        final_json = Path(f"{generator_output_base(source_image)}.json")
         try:
             final_stat = final_json.stat()
             final_before = (final_stat.st_mtime_ns, final_stat.st_size)
         except OSError:
             final_before = None
-        preview_path = generator_preview_path(input_image)
+        preview_path = generator_preview_path(source_image)
         if preview_path.exists():
             try:
                 preview_path.unlink()
@@ -4700,7 +4700,7 @@ class App:
         self.queue.put(("log", f"{prefix}Generating: {image_path}"))
         self.queue.put(("preview_file", image_path))
         flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
-        cmd = build_generator_command(input_image, setting)
+        cmd = build_generator_command(input_image, setting, output_image_path=source_image)
         self._record_detail(f"GENERATOR COMMAND: {self._format_command(cmd)}")
         self.queue.put(("log", f"{prefix}Running GPU generator with {setting['path'].name}"))
         if self.shutdown_event.is_set():
@@ -4766,7 +4766,7 @@ class App:
                 now = time.monotonic()
                 if now >= next_preview_scan:
                     next_preview_scan = now + GENERATOR_PREVIEW_SCAN_SECONDS
-                    preview_files = generated_preview_files(input_image)
+                    preview_files = generated_preview_files(source_image)
                     if preview_files:
                         newest_preview = preview_files[0]
                         preview_mtime = newest_preview.stat().st_mtime
@@ -4775,7 +4775,7 @@ class App:
                             self.queue.put(("preview_file", newest_preview))
                 if now >= next_json_scan:
                     next_json_scan = now + GENERATOR_JSON_SCAN_SECONDS
-                    newest = generated_jsons(input_image)
+                    newest = generated_jsons(source_image)
                     if newest and newest[0] != last_preview:
                         last_preview = newest[0]
                 time.sleep(GENERATOR_POLL_SLEEP_SECONDS)
@@ -4799,7 +4799,7 @@ class App:
             self.queue.put(("log", f"{prefix}Generator finished but no JSON output was found."))
             return "failed"
         for output in new_outputs:
-            preview_files = generated_preview_files(input_image)
+            preview_files = generated_preview_files(source_image)
             if preview_files:
                 self.queue.put(("preview_file", preview_files[0]))
             else:

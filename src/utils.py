@@ -42,7 +42,7 @@ def clamp_byte(value: float) -> int:
 
 # Extensions the generator actually processes; only these take part in the
 # same-name-same-extension rule. Other files keep their existing behaviour.
-IMAGE_NAME_DEDUP_SUFFIXES = {".jpg", ".jpeg", ".png"}
+IMAGE_NAME_DEDUP_SUFFIXES = {".bmp", ".jpg", ".jpeg", ".png"}
 
 
 def image_name_key(path: str | Path) -> Tuple[str, str] | None:

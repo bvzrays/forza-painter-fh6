@@ -108,7 +108,7 @@ def run_generation(stub, tmp_path, monkeypatch, source, returncode=0, write_fina
     monkeypatch.setattr(app_module, "preprocess_input_image", lambda image, setting: image)
     monkeypatch.setattr(app_module, "generated_preview_files", lambda image: [])
 
-    def fake_command(image, setting):
+    def fake_command(image, setting, **kwargs):
         if write_final is not None:
             final.parent.mkdir(parents=True, exist_ok=True)
             final.write_text(write_final, encoding="utf-8")

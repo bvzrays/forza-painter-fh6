@@ -330,7 +330,8 @@ def _get_preprocess_mode(values: dict[str, str] | None) -> str | None:
 
 
 def _preprocessed_image_path(image_path: Path, mode: str) -> Path:
-    return image_path.with_name(f"{image_path.stem}.{mode}{image_path.suffix}")
+    cache_dir = image_path.parent / ".preprocessed"
+    return cache_dir / f"{image_path.stem}.{mode}{image_path.suffix}"
 
 
 def preprocess_input_image(
@@ -354,7 +355,7 @@ def preprocess_input_image(
     if mode == "luma_band":
         # Delayed import to avoid circular deps at module load time.
         luma_band = __import__("preprocess.luma", fromlist=["luma_band"]).luma_band
-        return luma_band(image_path)
+        return luma_band(image_path, output_path=output_path)
     raise PreprocessError(f"unsupported preprocess mode: {mode}")
 
 
@@ -362,26 +363,16 @@ def preprocess_input_image(
 # Image naming
 # ---------------------------------------------------------------------------
 
-# The only preprocess mode preprocess_input_image can realize (see
-# preprocess.luma); its variant file is named "<stem>.<mode><ext>".
-REALIZED_PREPROCESS_MODES = ("luma_band",)
-
-
 def image_identity(image_path: str | Path) -> tuple[str, str]:
     """Naming identity ``(stem, extension)`` of an image.
 
     The extension is lower-cased without its dot so ``.PNG`` and ``.png``
-    share one backup/output folder. Preprocessed variants such as
-    ``<stem>.luma_band.png`` keep the identity of their base image so every
-    generator output of one image lands in the same place.
+    share one backup/output folder. This always uses the actual filename;
+    callers that preprocess an image must pass the original path separately
+    when choosing its output and preview paths.
     """
     image_path = Path(image_path)
-    stem = image_path.stem
-    for mode in REALIZED_PREPROCESS_MODES:
-        if stem.endswith("." + mode):
-            stem = stem[: -len(mode) - 1]
-            break
-    return stem, image_path.suffix.lstrip(".").lower()
+    return image_path.stem, image_path.suffix.lstrip(".").lower()
 
 
 def generator_output_dir(
@@ -540,18 +531,22 @@ def generated_preview_files(image_path: str | Path) -> list[Path]:
 # ---------------------------------------------------------------------------
 
 def build_generator_command(
-    image_path: str | Path, setting: SettingProfile
+    image_path: str | Path,
+    setting: SettingProfile,
+    *,
+    output_image_path: str | Path | None = None,
 ) -> list[str]:
     image_path = Path(image_path)
+    output_image_path = Path(output_image_path) if output_image_path is not None else image_path
     return [
         str(GENERATOR_EXE),
         str(image_path),
         "-settings",
         str(setting.path),
         "-output",
-        str(generator_output_base(image_path)),
+        str(generator_output_base(output_image_path)),
         "-preview",
-        str(generator_preview_path(image_path)),
+        str(generator_preview_path(output_image_path)),
     ]
 
 

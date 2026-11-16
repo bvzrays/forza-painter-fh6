@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import threading
+from pathlib import Path
 
 import pytest
 
 from generator_backend import (
+    SettingProfile,
+    build_generator_command,
     final_output_json,
     generated_jsons,
     generator_output_base,
+    _preprocessed_image_path,
     prepare_generation_copies,
 )
 
@@ -99,6 +103,61 @@ class TestPrepareGenerationCopies:
         assert all(path.parent != folder_jpg for path in found_png)
         assert folder_jpg / "doro1.json" in found_jpg
         assert all(path.parent != folder_png for path in found_jpg)
+
+    def test_luma_band_suffix_is_not_treated_as_a_preprocess_marker(self, dirs, tmp_path):
+        image_dir, output_dir = dirs
+        plain = _write_image(tmp_path / "a" / "logo.png", b"plain")
+        named = _write_image(tmp_path / "b" / "logo.luma_band.png", b"named")
+
+        plain_backup, plain_folder = prepare_generation_copies(plain, image_dir, output_dir)
+        named_backup, named_folder = prepare_generation_copies(named, image_dir, output_dir)
+
+        assert plain_folder == output_dir / "logo" / "png"
+        assert named_folder == output_dir / "logo.luma_band" / "png"
+        assert generator_output_base(plain_backup, output_dir) != generator_output_base(named_backup, output_dir)
+
+        plain_final = Path(f"{generator_output_base(plain_backup, output_dir)}.json")
+        named_final = Path(f"{generator_output_base(named_backup, output_dir)}.json")
+        plain_final.write_text("{}", encoding="utf-8")
+        named_final.write_text("{}", encoding="utf-8")
+        assert final_output_json(plain_backup, output_dir) == plain_final
+        assert final_output_json(named_backup, output_dir) == named_final
+
+    def test_preprocessed_input_keeps_original_output_identity(self, dirs, tmp_path, monkeypatch):
+        _image_dir, output_dir = dirs
+        import generator_backend
+
+        monkeypatch.setattr(generator_backend, "GENERATED_OUTPUT_DIR", output_dir)
+        monkeypatch.setattr(generator_backend, "PREVIEW_DIR", tmp_path / "previews")
+        real_output_base = generator_backend.generator_output_base
+        monkeypatch.setattr(
+            generator_backend,
+            "generator_output_base",
+            lambda image: real_output_base(image, output_dir),
+        )
+        original = _write_image(tmp_path / "source" / "logo.png")
+        preprocessed = _preprocessed_image_path(original, "luma_band")
+        setting = SettingProfile(index=0, source="test", path=tmp_path / "settings.ini", label="test")
+
+        command = build_generator_command(preprocessed, setting, output_image_path=original)
+
+        assert command[1] == str(preprocessed)
+        assert command[command.index("-output") + 1] == str(output_dir / "logo" / "png" / "logo")
+        assert command[command.index("-preview") + 1].endswith("logo.png.preview.png")
+        assert preprocessed.parent.name == ".preprocessed"
+
+    def test_preprocess_cache_cannot_overwrite_a_user_image(self, dirs, tmp_path):
+        image_dir, output_dir = dirs
+        source = _write_image(tmp_path / "a" / "logo.png", b"base")
+        user_image = _write_image(tmp_path / "b" / "logo.luma_band.png", b"user image")
+        base_backup, _ = prepare_generation_copies(source, image_dir, output_dir)
+        named_backup, named_folder = prepare_generation_copies(user_image, image_dir, output_dir)
+        cache_path = _preprocessed_image_path(base_backup, "luma_band")
+
+        assert cache_path != named_backup
+        assert cache_path.parent == base_backup.parent / ".preprocessed"
+        assert named_backup.read_bytes() == b"user image"
+        assert named_folder == output_dir / "logo.luma_band" / "png"
 
     def test_upper_case_extension_uses_the_same_folders(self, dirs, tmp_path):
         image_dir, output_dir = dirs

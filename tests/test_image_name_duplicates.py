@@ -23,8 +23,16 @@ def test_different_extension_is_allowed(tmp_path):
 
 
 def test_unsupported_extensions_keep_existing_behaviour(tmp_path):
-    assert image_name_key(tmp_path / "mabynotimage.bmp") is None
-    assert not is_duplicate_image_name(tmp_path / "mabynotimage.bmp", [tmp_path / "x" / "mabynotimage.bmp"])
+    assert image_name_key(tmp_path / "mabynotimage.webp") is None
+    assert not is_duplicate_image_name(tmp_path / "mabynotimage.webp", [tmp_path / "x" / "mabynotimage.webp"])
+
+
+def test_bmp_duplicates_are_rejected_like_other_supported_images(tmp_path):
+    first = tmp_path / "a" / "mabynotimage.bmp"
+    second = tmp_path / "b" / "mabynotimage.BMP"
+    assert is_duplicate_image_name(second, [first])
+
+    assert drop_duplicate_image_names([first, second]) == [first]
 
 
 def test_drop_keeps_first_occurrence_and_unsupported_files():
