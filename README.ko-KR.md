@@ -15,7 +15,7 @@
 </p>
 
 <p align="center">
-  <code>v1.9.6</code> · <code>Windows</code> · <code>Forza Horizon 6</code> · <code>GPU/OpenCL</code> · <code>One-file EXE</code>
+  <code>v1.9.7</code> · <code>Windows</code> · <code>Forza Horizon 6</code> · <code>GPU/OpenCL</code> · <code>One-file EXE</code>
 </p>
 
 <p align="center">
@@ -26,7 +26,7 @@
 
 PNG/JPG/BMP 이미지를 Forza Horizon 6 비닐 그룹 레이어로 변환합니다. 앱에서 생성, 미리보기, 가져오기를 한 번에 처리하며 일반 사용자는 Python, `.venv`, 배치 파일, 메모리 주소 입력이 필요 없습니다.
 
-> **EXE 다운로드:** [Releases](https://github.com/bvzrays/forza-painter-fh6/releases)에서 `forza-painter-fh6-v1.9.6.exe`를 내려받아 바로 실행하세요.
+> **EXE 다운로드:** [Releases](https://github.com/bvzrays/forza-painter-fh6/releases)에서 `forza-painter-fh6-v1.9.7.exe`를 내려받아 바로 실행하세요.
 
 > **프리셋 마켓:** https://painter6.com 에서 공유 이미지, 프리셋, JSON 패키지를 둘러보거나 앱 안의 새 마켓 배너로 바로 열 수 있습니다.
 
@@ -45,7 +45,7 @@ PNG/JPG/BMP 이미지를 Forza Horizon 6 비닐 그룹 레이어로 변환합니
 
 ## 빠른 시작
 
-1. [Releases](https://github.com/bvzrays/forza-painter-fh6/releases)에서 `forza-painter-fh6-v1.9.6.exe`를 내려받습니다.
+1. [Releases](https://github.com/bvzrays/forza-painter-fh6/releases)에서 `forza-painter-fh6-v1.9.7.exe`를 내려받습니다.
 2. EXE를 쓰기 가능한 일반 폴더에 둡니다. 예: `Desktop\forza-painter-fh6`.
 3. EXE를 더블 클릭합니다. FH6 가져오기에서 Windows가 프로세스 접근을 막으면 관리자 권한으로 실행하세요.
 4. FH6에서 `Create Vinyl Group` / `Vinyl Group Editor`를 열고 sphere 템플릿을 불러온 뒤 `Ungroup`합니다.
@@ -87,7 +87,7 @@ PNG/JPG/BMP 이미지를 Forza Horizon 6 비닐 그룹 레이어로 변환합니
 5. 하단의 `Start generating` 버튼을 클릭합니다.
 6. 미리보기와 로그가 업데이트될 때까지 기다립니다.
 
-생성된 파일은 원본 이미지 옆에 저장됩니다. 예: `image.500.json`, `image.1000.json`, `image.3000.json`.
+생성된 JSON과 체크포인트는 앱 폴더의 `out/<이미지 이름>/<확장자>/`에 저장되고, 원본 이미지는 `image/<확장자>/`에 백업됩니다. 예를 들어 `logo.png`의 출력은 `out/logo/png/`, `logo.jpg`의 출력은 `out/logo/jpg/`에 저장됩니다.
 
 템플릿 레이어 수와 가장 잘 맞는 높은 레이어 JSON을 사용하는 것이 좋습니다. 3000 레이어 템플릿에는 `image.3000.json` 또는 최종 `image.json`을 사용하세요.
 
@@ -163,6 +163,11 @@ EXE 옆에 생길 수 있는 외부 폴더:
 ## 변경 기록
 
 여기에는 버전 번호가 있는 릴리스만 남깁니다. 앱 업데이트 안내에 쓰이는 전체 기록은 [CHANGELOG.md](CHANGELOG.md)를 참고하세요.
+
+### v1.9.7 / 2026-11-16
+
+- 생성 JSON을 이미지 이름과 확장자별로 `out/`에 보관하고 원본 이미지는 `image/`에 백업합니다. 자동 선택은 해당 이미지의 최종 JSON만 사용합니다.
+- 이름 충돌을 방지하고 전처리 캐시를 분리했으며 BMP 중복 검사, UI 언어 기억, 목록 스크롤바를 추가했습니다.
 
 ### v1.9.2 / 2026-06-21
 

@@ -8,7 +8,7 @@ from pathlib import Path
 from utils import PreprocessError
 
 
-def luma_band(image_path: str | Path) -> Path:
+def luma_band(image_path: str | Path, output_path: str | Path | None = None) -> Path:
     """Apply luminance banding preprocessing and write result atomically.
 
     Returns the path to the preprocessed output file.
@@ -19,7 +19,12 @@ def luma_band(image_path: str | Path) -> Path:
         raise PreprocessError(f"failed to read image: {image_path}")
 
     result = _apply_preprocess(bgra)
-    output_path = image_path.with_name(f"{image_path.stem}.luma_band{image_path.suffix}")
+    output_path = (
+        Path(output_path)
+        if output_path is not None
+        else image_path.parent / ".preprocessed" / f"{image_path.stem}.luma_band{image_path.suffix}"
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Atomic write: write to a temp file first, then rename.
     # This avoids leaving a partially-written file if the process crashes mid-write.

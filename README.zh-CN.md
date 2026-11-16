@@ -15,7 +15,7 @@
 </p>
 
 <p align="center">
-  <code>v1.9.6</code> · <code>Windows</code> · <code>Forza Horizon 6</code> · <code>GPU/OpenCL</code> · <code>单文件 EXE</code>
+  <code>v1.9.7</code> · <code>Windows</code> · <code>Forza Horizon 6</code> · <code>GPU/OpenCL</code> · <code>单文件 EXE</code>
 </p>
 
 <p align="center">
@@ -26,7 +26,7 @@
 
 把 PNG/JPG/BMP 图片转换成 Forza Horizon 6 的 Vinyl Group 图层。软件内完成生成、预览和导入，普通用户不需要 Python、`.venv`、批处理文件，也不需要手动填写内存地址。
 
-> **下载 EXE：** 从 [Releases](https://github.com/bvzrays/forza-painter-fh6/releases) 下载 `forza-painter-fh6-v1.9.6.exe`，直接运行。
+> **下载 EXE：** 从 [Releases](https://github.com/bvzrays/forza-painter-fh6/releases) 下载 `forza-painter-fh6-v1.9.7.exe`，直接运行。
 
 > **预设市场：** 可以在 https://painter6.com 浏览玩家分享的图片、预设和 JSON 包，也可以通过软件内的新市场横幅直接打开。
 
@@ -45,7 +45,7 @@
 
 ## 快速开始
 
-1. 从 [Releases](https://github.com/bvzrays/forza-painter-fh6/releases) 下载 `forza-painter-fh6-v1.9.6.exe`。
+1. 从 [Releases](https://github.com/bvzrays/forza-painter-fh6/releases) 下载 `forza-painter-fh6-v1.9.7.exe`。
 2. 把 EXE 放在普通可写目录里，例如 `Desktop\forza-painter-fh6`。
 3. 双击 EXE 启动。导入 FH6 时如果被 Windows 拦截进程访问，请用管理员身份运行 EXE。
 4. 在游戏里进入 `Create Vinyl Group` / `Vinyl Group Editor`，加载球形模板并 `Ungroup`。
@@ -87,7 +87,7 @@
 5. 点击底部固定的 `Start generating`。
 6. 等待生成完成，右侧会显示预览，底部会显示日志。
 
-生成的文件会保存在原图片旁边，例如 `image.500.json`、`image.1000.json`、`image.3000.json`。
+生成的 JSON 和 checkpoint 会保存在软件旁的 `out/<图片名>/<扩展名>/`，原图会备份到 `image/<扩展名>/`。例如 `logo.png` 的输出位于 `out/logo/png/`，`logo.jpg` 的输出位于 `out/logo/jpg/`。
 
 同一张图片可能会生成多个 checkpoint JSON。导入时优先使用层数最高、最接近模板层数的 JSON；例如 3000 层模板应优先导入 `image.3000.json` 或最终 `image.json`。如果把 500 层 JSON 导入 3000 层模板，画面会明显发糊。
 
@@ -152,6 +152,20 @@ EXE 旁边可能出现这些外部文件夹：
 - **导入效果发糊：** 使用更高层数的 JSON，或提高 `Output layers` / `Random samples`。
 - **需要排查问题：** 在软件里点击 `Export detailed log`，把导出的日志附到 issue。
 
+## 从源码构建
+
+需要 Python 和 PyInstaller。
+
+1. 安装 64 位 Python 3.10–3.13（Windows 版）。
+2. 运行 `install_dependencies.bat`（或 `scripts\ensure_venv.bat`），脚本会创建项目 `.venv` 并安装 `requirements.txt` 及可选的预览依赖。
+3. 可选：运行测试：`.venv\Scripts\python.exe -m pytest`。
+4. 用 PowerShell 构建：`powershell -ExecutionPolicy Bypass -File scripts\make_exe_release.ps1`。
+5. 脚本输出 `dist\forza-painter-fh6-v<版本号>.exe` 和对应的 `-onefile.zip` 压缩包，版本号取自 `src\version.py`。
+
+构建脚本已自动处理 Windows venv 的 Tcl/Tk 问题：它会把 `TCL_LIBRARY`/`TK_LIBRARY` 指向 Python 安装目录，并在调用 PyInstaller 前验证 `tkinter` 能启动，因此有问题的构建会直接报错，而不是产出一个缺 tkinter 的 EXE。
+
+注意：不要在「受保护」的文件夹里运行或解压构建出的 EXE。若出现 `Could not create temporary directory!`，以管理员身份启动，或在其它盘根目录新建一个文件夹存放构建文件。
+
 ## 资源链接
 
 - 导入参考视频：https://www.bilibili.com/video/BV1hG5Z6nENZ
@@ -162,6 +176,11 @@ EXE 旁边可能出现这些外部文件夹：
 ## 更新日志
 
 这里仅保留带版本号的发布记录。用于软件更新弹窗的完整记录见 [CHANGELOG.md](CHANGELOG.md)。
+
+### v1.9.7 / 2026-11-16
+
+- 生成的 JSON 按图片名和扩展名归档到 `out/`，原图备份到 `image/`；自动选择 JSON 时只认对应图片的最终文件。
+- 防止同名输出冲突，隔离预处理缓存，增加 BMP 重名检查，记住上次选择的界面语言，并为列表添加滚动条。
 
 ### v1.9.2 / 2026-06-21
 

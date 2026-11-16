@@ -14,6 +14,9 @@ webui-data/
 runtime/
 dist/
 build/
+# Generate-page output folders (image backups and per-image JSON)
+image/
+out/
 
 # Large/volatile FH6 diagnostics
 *count-*.json

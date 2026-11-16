@@ -16,7 +16,7 @@
 </p>
 
 <p align="center">
-  <code>v1.9.6</code> · <code>Windows</code> · <code>Forza Horizon 6</code> · <code>GPU/OpenCL</code> · <code>EXE de un solo archivo</code>
+  <code>v1.9.7</code> · <code>Windows</code> · <code>Forza Horizon 6</code> · <code>GPU/OpenCL</code> · <code>EXE de un solo archivo</code>
 </p>
 
 <p align="center">
@@ -27,7 +27,7 @@
 
 Convierte imágenes PNG/JPG/BMP en capas de Grupo de Vinilo para Forza Horizon 6. La aplicación integra la generación, la vista previa y la importación en una sola ventana de escritorio; los usuarios normales no necesitan Python, `.venv`, archivos batch ni direcciones de memoria manuales.
 
-> **Descarga el EXE:** obtén `forza-painter-fh6-v1.9.6.exe` desde [Releases](https://github.com/bvzrays/forza-painter-fh6/releases) y ejecútalo directamente.
+> **Descarga el EXE:** obtén `forza-painter-fh6-v1.9.7.exe` desde [Releases](https://github.com/bvzrays/forza-painter-fh6/releases) y ejecútalo directamente.
 
 > **Preset Market:** explora imágenes compartidas, presets y paquetes JSON en https://painter6.com o usa el nuevo banner del mercado dentro de la aplicación.
 
@@ -46,7 +46,7 @@ Convierte imágenes PNG/JPG/BMP en capas de Grupo de Vinilo para Forza Horizon 6
 
 ## Inicio rápido
 
-1. Descarga `forza-painter-fh6-v1.9.6.exe` desde [Releases](https://github.com/bvzrays/forza-painter-fh6/releases).
+1. Descarga `forza-painter-fh6-v1.9.7.exe` desde [Releases](https://github.com/bvzrays/forza-painter-fh6/releases).
 2. Coloca el EXE en una carpeta normal con permisos de escritura, por ejemplo `Desktop\forza-painter-fh6`.
 3. Haz doble clic en el EXE. Para importar a FH6, ejecútalo como administrador si Windows bloquea el acceso al proceso.
 4. En FH6, abre `Create Vinyl Group` / `Vinyl Group Editor`, carga una plantilla de esferas y luego usa `Ungroup`.
@@ -88,7 +88,7 @@ No descargues el ZIP automático de `Source code` de GitHub a menos que vayas a 
 5. Haz clic en el botón fijo inferior `Start generating`.
 6. Espera a que se actualicen la vista previa y los registros.
 
-Los archivos generados se guardan junto a la imagen original, por ejemplo `image.500.json`, `image.1000.json` e `image.3000.json`.
+Los JSON y puntos de control se guardan junto a la app en `out/<nombre de imagen>/<extensión>/`. Las imágenes originales se respaldan en `image/<extensión>/`. Por ejemplo, los resultados de `logo.png` van a `out/logo/png/` y los de `logo.jpg` a `out/logo/jpg/`.
 
 Una sola imagen puede generar varios archivos JSON de punto de control. Se recomienda usar el JSON con más capas que coincida con tu plantilla; por ejemplo, usa `image.3000.json` o el `image.json` final con una plantilla de 3000 capas. Importar un JSON de 500 capas en una plantilla de 3000 capas hará que el resultado se vea borroso.
 
@@ -164,6 +164,12 @@ Estas carpetas pueden eliminarse cuando la app esté cerrada si quieres restable
 ## Changelog
 
 Aquí solo se conservan las entradas de versiones publicadas. Consulta [CHANGELOG.md](CHANGELOG.md) para ver el changelog que muestra el aviso de actualización de la app.
+
+### v1.9.7 / 2026-11-16
+
+- Los JSON generados se archivan en `out/` por nombre y extensión de imagen; las imágenes originales se respaldan en `image/`, y la selección automática usa solo el JSON final correspondiente.
+- Se evitan colisiones de nombres, se aísla la caché de preprocesamiento y se agregan validación de duplicados BMP, idioma de interfaz persistente y barras de desplazamiento en las listas.
+
 ### v1.9.2 / 2026-06-21
 
 - **Modo de exclusión en Region Paint** — Nueva casilla "Modo de exclusión" para dibujar zonas de exclusión (superposición negra) junto con zonas de inclusión (superposición roja). La exclusión tiene prioridad en áreas superpuestas. Alterna cualquier forma seleccionada con el botón "Alternar inclusión/exclusión".

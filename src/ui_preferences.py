@@ -10,6 +10,10 @@ from app_paths import ROOT
 
 PREFERENCES_PATH = ROOT / "runtime" / "settings" / "ui_preferences.json"
 
+# Must match the values of the LANGUAGES mapping in app.py. Empty string
+# means "never chosen" and the app falls back to English.
+SUPPORTED_UI_LANGUAGES = ("en", "pt-br", "zh", "zh-tw", "ko", "es")
+
 
 def _default_preferences() -> Dict[str, Any]:
     return {
@@ -19,6 +23,7 @@ def _default_preferences() -> Dict[str, Any]:
         "text_import_shape_notice_dismissed": False,
         "generator_gpu_device": "",
         "generator_parallel_jobs": 1,
+        "ui_language": "",
     }
 
 
@@ -40,6 +45,9 @@ def load_ui_preferences() -> Dict[str, Any]:
         prefs["generator_parallel_jobs"] = max(1, int(prefs.get("generator_parallel_jobs") or 1))
     except (TypeError, ValueError):
         prefs["generator_parallel_jobs"] = 1
+    prefs["ui_language"] = str(prefs.get("ui_language") or "")
+    if prefs["ui_language"] not in SUPPORTED_UI_LANGUAGES:
+        prefs["ui_language"] = ""
     return prefs
 
 
